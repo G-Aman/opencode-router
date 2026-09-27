@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Squircle container matching Concept C -->
+  <rect x="32" y="32" width="448" height="448" rx="96" fill="#0f172a" stroke="#334155" stroke-width="8" />
+
+  <!-- The Open Ring (Concept C exact orientation):
+       In PIL: arc from 45 deg to 315 deg.
+       In standard math/SVG:
+       315 deg (-45 deg) is TOP RIGHT: (333.78, 178.22)
+       45 deg is BOTTOM RIGHT: (333.78, 333.78)
+       Going around the LEFT side (180 deg) means:
+       from (333.78, 178.22) counter-clockwise (sweep-flag=0) to (333.78, 333.78).
+  -->
+  <path d="M 333.78 178.22 A 110 110 0 1 0 333.78 333.78" fill="none" stroke="#ffffff" stroke-width="36" stroke-linecap="round" />
+
+  <!-- Electric blue beam shooting through the open right gate -->
+  <line x1="226" y1="256" x2="386" y2="256" stroke="#0284c7" stroke-width="36" stroke-linecap="round" />
+
+  <!-- Terminal emerald node at (cx+130 = 386, cy = 256) -->
+  <circle cx="386" cy="256" r="20" fill="#10b981" />
+</svg>

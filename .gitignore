@@ -1,0 +1,9 @@
+opencode-router.json
+opencode-sync-cache.json
+models-dev-cache.json
+*.log
+opencode-router
+*.exe
+dist/
+build/
+.DS_Store

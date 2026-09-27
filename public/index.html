@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenCode Router — High-Performance Model Router</title>
+<link rel="icon" href="/assets/logo.svg?v=9">
+<style>
+:root {
+  --paper:#f8fafc;
+  --paper2:#f1f5f9;
+  --card:#ffffff;
+  --ink:#0f172a;
+  --ink2:#334155;
+  --acid:#10b981;
+  --coral:#ef4444;
+  --grape:#0284c7;
+  --sky:#0ea5e9;
+  --muted:#64748b;
+  --line:1.5px solid #cbd5e1;
+  --sans:"Helvetica Neue",Helvetica,"Segoe UI",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --spring:cubic-bezier(.34,1.56,.64,1);
+  --smooth:cubic-bezier(.16,1,.3,1);
+}
+* { box-sizing:border-box; margin:0; padding:0 }
+html,body { min-height:100% }
+body {
+  font-family:var(--sans); background:var(--paper); color:var(--ink);
+  font-size:14px; line-height:1.5; overflow-x:hidden;
+  background-image:radial-gradient(rgba(26,22,18,.09) 1px, transparent 1.3px);
+  background-size:22px 22px;
+}
+a { color:var(--ink) }
+
+/* ---------- soft ink-wash blobs + grain ---------- */
+.blobs { position:fixed; inset:0; z-index:-1; overflow:hidden; pointer-events:none }
+.blob { position:absolute; border-radius:50%; filter:blur(70px); will-change:transform; contain:strict }
+.b1 { width:52vmax; height:52vmax; left:-14vmax; top:-18vmax; background:radial-gradient(#bae6fd,transparent 65%); opacity:.35; animation:drift1 26s ease-in-out infinite alternate }
+.b2 { width:46vmax; height:46vmax; right:-15vmax; top:2vmax; background:radial-gradient(#d1fae5,transparent 65%); opacity:.3; animation:drift2 30s ease-in-out infinite alternate }
+.b3 { width:48vmax; height:48vmax; left:16vmax; bottom:-24vmax; background:radial-gradient(#e0e7ff,transparent 65%); opacity:.3; animation:drift3 34s ease-in-out infinite alternate }
+.b4 { width:34vmax; height:34vmax; right:20vmax; bottom:-12vmax; background:radial-gradient(#e2e8f0,transparent 65%); opacity:.35; animation:drift4 22s ease-in-out infinite alternate }
+@keyframes drift1 { to { transform:translate(9vmax,6vmax) scale(1.15) } }
+@keyframes drift2 { to { transform:translate(-8vmax,8vmax) scale(1.2) } }
+@keyframes drift3 { to { transform:translate(6vmax,-7vmax) scale(1.1) } }
+@keyframes drift4 { to { transform:translate(-7vmax,-6vmax) scale(1.25) } }
+.grain { position:fixed; inset:0; z-index:70; pointer-events:none; opacity:.05;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  background-size:300px 300px }
+@media (prefers-reduced-motion: reduce) { .blob { animation:none } }
+
+/* ---------- header ---------- */
+header {
+  position:sticky; top:0; z-index:40;
+  display:flex; align-items:center; gap:14px;
+  max-width:1120px; margin:0 auto; padding:14px 18px;
+  background:rgba(255,255,255,.94); border-bottom:var(--line);
+  -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+}
+.brand { display:flex; align-items:center; gap:10px; white-space:nowrap }
+.brand .logo {
+  width:34px; height:34px; display:block; object-fit:contain;
+  border-radius:8px; border:1px solid #334155;
+  box-shadow:0 2px 5px rgba(0,0,0,0.12);
+  background:#090d16;
+}
+.brand .txt { font-family:var(--mono); font-weight:800; font-size:14px; letter-spacing:.08em }
+nav.capsule {
+  position:relative; display:flex; align-items:center; gap:6px; padding:5px 6px; flex:1; min-width:0;
+  background:var(--paper2); border:var(--line); border-radius:999px;
+  overflow-x:auto; scrollbar-width:none;
+}
+nav.capsule::-webkit-scrollbar { display:none }
+.nav-indicator {
+  position:absolute; top:5px; left:0; height:calc(100% - 10px); border-radius:999px;
+  background:#0284c7; border:none;
+  box-shadow:0 2px 6px rgba(2,132,199,0.3);
+  transition:transform .5s var(--spring), width .5s var(--spring);
+  pointer-events:none; z-index:0;
+}
+nav button {
+  position:relative; z-index:1; flex:0 0 auto; border:none; cursor:pointer;
+  background:transparent; color:var(--muted);
+  padding:8px 18px; border-radius:999px;
+  font-family:var(--mono); font-weight:800; font-size:11.5px; letter-spacing:.1em; text-transform:uppercase;
+  transition:color .25s, transform .25s var(--spring);
+}
+nav button:hover { color:var(--ink) }
+nav button:active { transform:scale(.92) }
+nav button.active { color:#ffffff }
+.pill {
+  display:inline-flex; align-items:center; gap:8px; padding:7px 14px; white-space:nowrap;
+  background:#ffffff; border:1.5px solid #cbd5e1; border-radius:999px;
+  box-shadow:0 1px 3px rgba(0,0,0,0.05);
+  font-family:var(--mono); font-weight:700; font-size:11px; letter-spacing:.06em; text-transform:uppercase;
+  color:#334155;
+}
+.pill .dot { width:9px; height:9px; border-radius:50%; background:#94a3b8; transition:all .2s }
+.dot.ok { background:#10b981; box-shadow:0 0 0 3px #d1fae5, 0 0 8px #10b981 }
+.dot.bad { background:#ef4444; box-shadow:0 0 0 3px #fee2e2, 0 0 8px #ef4444 }
+
+/* ---------- marquee strip ---------- */
+.marquee {
+  position:relative; max-width:1084px; margin:20px auto 0; overflow:hidden;
+  border:var(--line); background:#ffffff; color:#0284c7;
+  border-radius:10px; box-shadow:0 2px 6px rgba(15,23,42,0.06);
+}
+.mq-track {
+  display:flex; width:max-content; animation:mq 26s linear infinite; will-change:transform;
+  font-family:var(--mono); font-weight:800; font-size:11.5px; letter-spacing:.16em; text-transform:uppercase;
+  white-space:nowrap; padding:7px 0;
+}
+.mq-track span { padding:0 18px }
+@keyframes mq { to { transform:translateX(-50%) } }
+@media (prefers-reduced-motion: reduce) { .mq-track { animation:none } }
+
+main { max-width:1120px; margin:28px auto 70px; padding:0 18px }
+.banner {
+  display:none; max-width:1084px; margin:22px auto 0; padding:13px 18px;
+  border:var(--line); background:var(--coral); color:#fff;
+  font-family:var(--mono); font-weight:800; font-size:12px; letter-spacing:.06em; text-transform:uppercase;
+  box-shadow:5px 5px 0 var(--ink); transform:rotate(-.4deg);
+}
+.banner.error { display:block }
+
+/* ---------- liquid tab transitions ---------- */
+.tab { display:none }
+.tab.active { display:block; animation:tabIn .55s var(--smooth) }
+.tab.leaving { display:block; animation:tabOut .34s ease forwards; pointer-events:none }
+@keyframes tabIn { from { opacity:0; transform:translateY(20px) rotate(.5deg) scale(.985); filter:blur(8px) } to { opacity:1; transform:none; filter:none } }
+@keyframes tabOut { to { opacity:0; transform:translateY(-14px) rotate(-.4deg); filter:blur(6px) } }
+@media (prefers-reduced-motion: reduce) { .tab.active { animation:none } }
+
+/* ---------- cards ---------- */
+.cards { display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:24px }
+@media (max-width:1000px) { .cards { grid-template-columns:repeat(3,1fr) } }
+@media (max-width:760px) { .cards { grid-template-columns:repeat(2,1fr) } }
+@media (max-width:460px) { .cards { grid-template-columns:1fr } }
+.card {
+  position:relative; padding:20px; min-width:0;
+  background:var(--card); border:var(--line); border-radius:22px 8px 22px 8px;
+  box-shadow:8px 8px 0 var(--ink);
+  transform:rotate(var(--tilt,0));
+  transition:transform .35s var(--smooth), box-shadow .35s var(--smooth);
+}
+.card:nth-child(odd) { --tilt:-.7deg }
+.card:nth-child(even) { --tilt:.6deg }
+.card:hover { transform:translateY(-4px) rotate(0deg); box-shadow:12px 12px 0 var(--ink) }
+.card .label {
+  font-family:var(--mono); font-size:10px; font-weight:800; color:var(--muted);
+  text-transform:uppercase; letter-spacing:.14em; display:flex; align-items:center; gap:6px;
+}
+.card .label::before { content:"◦" }
+.card .value { font-size:34px; font-weight:900; margin-top:10px; letter-spacing:-.045em; font-variant-numeric:tabular-nums; text-transform:uppercase }
+.card .value.mono { font-size:14px; letter-spacing:0; text-transform:none; font-weight:800; overflow-wrap:anywhere; word-break:break-word; line-height:1.4 }
+.card .sub { font-family:var(--mono); font-size:10.5px; color:var(--muted); margin-top:8px; text-transform:uppercase; letter-spacing:.08em }
+.cards .card.hero {
+  background: #0f172a;
+  border: 1.5px solid #1e293b;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+  color: #ffffff;
+}
+.cards .card.hero .label { color: #94a3b8; font-weight: 700; }
+.cards .card.hero .label::before { color: #38bdf8; }
+.cards .card.hero .value { color: #ffffff; font-weight: 900; }
+.cards .card.hero .sub { color: #38bdf8; font-weight: 600; }
+.cards .card.hero:hover { box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25); }
+
+/* ---------- panels ---------- */
+.panel {
+  position:relative; padding:26px; margin-bottom:24px;
+  background:var(--card); border:var(--line); border-radius:26px 10px 26px 10px;
+  box-shadow:9px 9px 0 var(--ink);
+}
+.panel h2 {
+  display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;
+  font-family:var(--mono); font-size:12.5px; font-weight:800; letter-spacing:.14em; text-transform:uppercase;
+}
+.panel h2 .hh {
+  padding:0 8px; background:linear-gradient(transparent 62%, rgba(204,247,58,.85) 62%);
+}
+.hint { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-top:8px; line-height:1.7 }
+code { background:rgba(26,22,18,.08); padding:1px 5px; border-radius:4px; font-family:var(--mono); font-size:.95em }
+
+/* ---------- table ---------- */
+table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums }
+th,td { text-align:left; padding:12px 12px; border-bottom:var(--line); font-size:13px }
+th { font-family:var(--mono); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.12em; color:var(--muted) }
+td { border-bottom:1px dashed rgba(26,22,18,.35) }
+tbody tr { transition:background .18s }
+tbody tr:hover { background:rgba(204,247,58,.25) }
+tbody tr:last-child td { border-bottom:none }
+.mono { font-family:var(--mono); font-size:12.5px }
+.badge { display:inline-block; padding:2.5px 9px; border-radius:999px; font-family:var(--mono); font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase }
+.badge.ok { background:#ecfdf5; color:#047857; border:1px solid #a7f3d0 }
+.badge.bad { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca }
+.badge.warn { background:#fffbeb; color:#b45309; border:1px solid #fde68a }
+.badge.mut { background:#f1f5f9; color:#475569; border:1px solid #cbd5e1 }
+
+/* Tooltip — purpose-built for this dashboard. Sticker-card look that reuses the
+   same ink border + hard offset shadow as the badges and buttons, a two-tone
+   pointer so it reads as attached, and a spring entrance. Auto-width, so the
+   copy can never overflow, and it flips below the trigger near the top edge.
+   Zero dependencies. */
+[data-tip] { position:relative; cursor:help }
+[data-tip]:focus-visible { outline:2px solid var(--ink); outline-offset:2px }
+.ztip {
+  position:absolute; left:50%; bottom:calc(100% + 11px);
+  width:max-content; max-width:250px;
+  padding:8px 12px 9px;
+  background:var(--paper); color:var(--ink);
+  border:2px solid var(--ink); border-radius:10px;
+  box-shadow:3px 3px 0 var(--ink);
+  text-align:left; pointer-events:none; z-index:70;
+  opacity:0; visibility:hidden;
+  transform:translate(-50%, 5px) scale(.96); transform-origin:50% 100%;
+  transition:opacity .15s ease, transform .2s cubic-bezier(.34,1.35,.64,1), visibility 0s linear .2s;
+}
+.ztip.open { opacity:1; visibility:visible; transform:translate(-50%,0) scale(1); transition-delay:0s }
+.ztip-title {
+  display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+  font-family:var(--mono); font-size:9.5px; font-weight:800;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--ztip-accent, var(--ink));
+  overflow-wrap:anywhere;
+}
+.ztip-title::before {
+  content:""; width:8px; height:8px; flex:none;
+  background:var(--ztip-accent, var(--ink)); border:1.5px solid var(--ink); border-radius:2px;
+}
+.ztip-body { margin-top:4px; font-family:var(--sans); font-size:12px; line-height:1.45; color:var(--ink); overflow-wrap:anywhere; max-height:150px; overflow-y:auto }
+/* pointer: ink triangle with a paper triangle layered on top for a bordered join */
+.ztip::before, .ztip::after {
+  content:""; position:absolute; left:50%; width:0; height:0;
+  border-left:7px solid transparent; border-right:7px solid transparent;
+}
+.ztip::after { top:100%; transform:translateX(-50%); border-top:9px solid var(--ink); z-index:0 }
+.ztip::before { top:100%; z-index:1; transform:translateX(-50%) translateY(-2px); border-top:6px solid var(--paper) }
+.ztip.below { bottom:auto; top:calc(100% + 11px); transform:translate(-50%,-5px) scale(.96); transform-origin:50% 0 }
+.ztip.below.open { transform:translate(-50%,0) scale(1) }
+.ztip.below::after { top:auto; bottom:100%; border-top:0; border-bottom:9px solid var(--ink) }
+.ztip.below::before { top:auto; bottom:100%; border-top:0; border-bottom:6px solid var(--paper); transform:translateX(-50%) translateY(2px) }
+@media (prefers-reduced-motion: reduce) { .ztip { transition:none } }
+
+.empty { font-family:var(--serif); font-style:italic; color:var(--muted); text-align:center; padding:38px; font-size:15px }
+.pager { display:flex; align-items:center; justify-content:flex-end; gap:12px; margin-top:16px }
+.pager button { padding:6px 13px; font-size:10.5px; box-shadow:3px 3px 0 var(--ink) }
+.pager button:active { box-shadow:0 0 0 var(--ink) }
+.pager-info { font-family:var(--mono); font-size:11px; font-weight:800; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; white-space:nowrap }
+
+/* ---------- controls ---------- */
+button {
+  background:var(--ink); color:var(--card); border:2px solid var(--ink);
+  padding:9px 16px; border-radius:10px; cursor:pointer;
+  font-family:var(--mono); font-weight:800; font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+  box-shadow:4px 4px 0 var(--ink);
+  transition:transform .2s var(--spring), box-shadow .2s, background .2s, color .2s;
+}
+button:hover { transform:translate(-1px,-1px); box-shadow:6px 6px 0 var(--ink) }
+button:active { transform:translate(2px,2px); box-shadow:0 0 0 var(--ink) }
+button:disabled { opacity:.45; cursor:not-allowed; transform:none; box-shadow:4px 4px 0 var(--ink) }
+button.primary { background:#0284c7; color:#ffffff; border:1.5px solid #0284c7; box-shadow:0 2px 6px rgba(2,132,199,0.25); }
+button.primary:hover { background:#0369a1; border-color:#0369a1; color:#ffffff; }
+button.primary:hover { box-shadow:7px 7px 0 var(--ink) }
+input, select, textarea {
+  background:#fff; color:var(--ink); border:2px solid var(--ink); border-radius:10px;
+  padding:11px 13px; font-size:13.5px; width:100%; font-family:var(--sans);
+  transition:box-shadow .2s, background .2s;
+}
+input:focus, select:focus, textarea:focus { outline:none; box-shadow:0 0 0 3px var(--acid) }
+label {
+  display:block; font-family:var(--mono); font-size:10.5px; font-weight:800; color:var(--ink2);
+  margin:16px 0 7px; text-transform:uppercase; letter-spacing:.12em;
+}
+label::before { content:"▸ "; color:var(--coral) }
+/* ---------- endpoint card ---------- */
+.endpoint-card {
+  display:flex; align-items:center; gap:10px;
+  background:#ffffff; border:1px solid #cbd5e1; border-radius:10px;
+  padding:8px 12px; margin-bottom:16px; box-shadow:0 1px 3px rgba(15,23,42,0.04);
+  box-sizing:border-box; width:100%;
+}
+.endpoint-tag {
+  background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;
+  font-family:var(--mono); font-weight:800; font-size:9.5px; letter-spacing:.05em;
+  padding:3px 6px; border-radius:4px; flex:0 0 auto; white-space:nowrap;
+}
+.endpoint-val {
+  font-family:var(--mono); font-size:12px; font-weight:700; color:#0f172a;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  flex:1; min-width:0; user-select:all;
+}
+.endpoint-copy-btn {
+  flex:0 0 auto; font-size:11px; padding:5px 12px; border-radius:6px;
+  white-space:nowrap; cursor:pointer; line-height:1.2;
+}
+.formgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:0 24px }
+textarea { resize:vertical; min-height:96px; font-family:var(--mono); font-size:12.5px }
+.row { display:flex; gap:12px; align-items:center; flex-wrap:wrap }
+.row .grow { flex:1 }
+.checkbox { display:flex; align-items:center; gap:10px; margin-top:18px }
+.checkbox input { width:auto; accent-color:var(--coral) }
+.checkbox span { font-size:13.5px }
+.checkbox code { font-size:.9em }
+.testCell { transition:color .2s; font-weight:700 }
+
+/* ---------- logs ---------- */
+.logs {
+  background:#15120d; border:var(--line); border-radius:14px; padding:16px; height:430px; overflow-y:auto;
+  font-family:var(--mono); font-size:12px; color:#e9e2d2;
+  box-shadow:inset 0 2px 18px rgba(0,0,0,.5);
+}
+.logs .ts { color:#8a806c; margin-right:14px }
+.logs .line { white-space:pre-wrap; word-break:break-all; padding:3px 0 }
+.logs .line:hover { background:rgba(204,247,58,.08) }
+
+/* ---------- toast ---------- */
+.toast {
+  position:fixed; bottom:26px; right:26px; z-index:60;
+  padding:15px 24px; border-radius:12px;
+  font-family:var(--mono); font-weight:800; font-size:12px; letter-spacing:.06em;
+  background:var(--ink); color:var(--card);
+  border:2px solid var(--ink); border-left:8px solid var(--acid);
+  box-shadow:6px 6px 0 var(--ink);
+  opacity:0; transform:translateY(12px) rotate(1deg); transition:.3s var(--spring); pointer-events:none;
+}
+.toast.show { opacity:1; transform:none }
+.toast.bad { border-left-color:var(--coral) }
+
+/* ---------- stickers ---------- */
+.sticker {
+  display:inline-block; padding:7px 16px;
+  font-family:var(--mono); font-weight:800; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+  background:var(--acid); border:2px solid var(--ink); border-radius:999px;
+  box-shadow:4px 4px 0 var(--ink); transform:rotate(-4deg);
+}
+.sticker.coral { background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; transform:none }
+.sticker.grape { background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; transform:none }
+
+/* ---------- auth ---------- */
+#authScreen {
+  position:fixed; inset:0; z-index:100; display:none; align-items:center; justify-content:center;
+  background:rgba(26,22,18,.6); -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px);
+}
+#authScreen .box { width:360px; padding:32px; background:var(--ink); color:var(--card);
+  border:2px solid var(--ink); border-radius:18px; box-shadow:12px 12px 0 var(--acid); animation:tabIn .5s var(--smooth) }
+#authScreen h2 { font-family:var(--mono); font-size:15px; letter-spacing:.12em; text-transform:uppercase; margin-bottom:8px; color:var(--acid) }
+#authScreen p { color:#c9c1ae; font-size:13px; margin-bottom:20px }
+#authScreen .box input { background:#241f18; border-color:#4a4234; color:var(--card) }
+#authScreen .box input:focus { box-shadow:0 0 0 3px var(--acid) }
+
+@media (max-width:760px) {
+  .brand .txt { display:none }
+  header { padding:10px 14px; gap:8px }
+  nav button { padding:7px 12px; font-size:11px }
+  main { padding:0 12px }
+}
+@media (max-width:480px) {
+  header { padding:8px 10px; gap:6px }
+  nav button { padding:6px 9px; font-size:10px; letter-spacing:.04em }
+  #upstreamText { display:none }
+  .pill { padding:6px 8px }
+}
+</style>
+</head>
+<body>
+
+<div class="blobs" aria-hidden="true">
+  <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span>
+</div>
+<div class="grain" aria-hidden="true"></div>
+
+<div id="authScreen" style="display:none">
+  <div class="box">
+    <img src="/assets/logo.svg?v=9" alt="OpenCode Router logo" style="width:56px;height:56px;border-radius:14px;border:2px solid var(--acid);box-shadow:3px 3px 0 var(--coral);margin-bottom:16px;object-fit:cover">
+    <h2>Locked 🔒</h2>
+    <p>This dashboard is protected. Enter the admin key (<code>PROXY_KEY</code>) to get in.</p>
+    <input type="password" id="authKey" placeholder="admin key" autocomplete="off">
+    <div class="row" style="margin-top:20px">
+      <button class="primary grow" onclick="submitAuth()">Unlock</button>
+    </div>
+  </div>
+</div>
+
+<header>
+  <div class="brand"><img src="/assets/logo.svg?v=9" alt="OpenCode Router logo" class="logo"><span class="txt">OPENCODE·ROUTER</span></div>
+  <nav class="capsule" id="nav">
+    <div class="nav-indicator" id="navIndicator"></div>
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="models">Models</button>
+    <button data-tab="config">Settings</button>
+    <button data-tab="logs">Logs</button>
+  </nav>
+  <span class="pill" id="upstreamPill"><span class="dot" id="upstreamDot"></span><span id="upstreamText">checking…</span></span>
+</header>
+
+
+
+<div class="banner" id="banner"></div>
+
+<main>
+  <section class="tab active" id="tab-overview">
+    <!-- Dynamic OpenAPI Endpoint Banner -->
+    <div class="endpoint-card">
+      <span class="endpoint-tag">OPENAI BASE URL</span>
+      <span class="endpoint-val" id="endpointUrl" title="Click to copy">http://127.0.0.1:8790/v1</span>
+      <button type="button" class="primary endpoint-copy-btn" id="copyBtn" onclick="copyEndpoint()">Copy URL</button>
+    </div>
+    <div class="cards">
+      <div class="card hero"><div class="label">Requests served</div><div class="value" id="ovTotal">–</div><div class="sub" id="ovErr">0 errors</div></div>
+      <div class="card"><div class="label">Upstream</div><div class="value mono" id="ovUpstream">–</div><div class="sub" id="ovUa">–</div></div>
+      <div class="card"><div class="label">Uptime</div><div class="value" id="ovUptime">–</div><div class="sub">seconds online</div></div>
+      <div class="card"><div class="label">Last minute</div><div class="value" id="ovMin">–</div><div class="sub" id="ov5m">– in 5 min</div></div>
+      <div class="card"><div class="label">Models</div><div class="value" id="ovModels">–</div><div class="sub" id="ovAllowed">– allowed</div></div>
+    </div>
+
+    <div class="panel">
+      <h2><span class="hh">Recent requests</span><span class="sticker grape" style="transform:none">live feed</span></h2>
+      <table id="reqTable">
+        <thead><tr><th>Time</th><th>Model</th><th>Result</th><th>Latency</th><th>Count</th></tr></thead>
+        <tbody><tr><td colspan="5" class="empty">no requests yet — go make some noise.</td></tr></tbody>
+      </table>
+      <div class="pager" id="reqPager"></div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-models">
+    <div class="panel">
+      <h2><span class="hh">Allowed models</span><span class="badge mut" id="modelCount"></span></h2>
+      <p class="hint" style="margin-bottom:16px">These are served on <code>/v1/models</code> and accepted by the proxy. Hit <b>TEST</b> to send a tiny completion and see live status. The default model is used when a request asks for an unknown one. Auto-sync probes every upstream free model and prunes the dead ones automatically.</p>
+      <div class="row" style="margin:0 0 16px;gap:12px">
+        <span class="badge mut" id="syncStatus">auto-sync: …</span>
+        <button id="syncBtn" style="margin-left:auto" onclick="syncNow()">⟳ Sync now</button>
+      </div>
+      <div style="overflow-x:auto;margin:0 -4px;padding:0 4px">
+      <table id="modelTable" style="width:100%;min-width:680px">
+        <thead>
+          <tr>
+            <th style="width:44%">Model</th>
+            <th style="width:10%;text-align:center">Default</th>
+            <th style="width:34%">Last test</th>
+            <th style="width:12%;text-align:right;padding-right:16px">Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="row" style="margin-top:18px">
+        <input class="grow" id="newModel" placeholder="add a model id, e.g. nemotron-3-ultra-free">
+        <button onclick="addModel()">+ Add</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-config">
+    <div class="panel">
+      <h2><span class="hh">Server settings</span><span class="sticker coral" style="transform:none">port / host need restart</span></h2>
+      <div class="formgrid">
+        <div>
+          <label>Host</label><input id="cfgHost" type="text">
+          <label>Port</label><input id="cfgPort" type="number">
+          <label>Upstream url</label><input id="cfgUpstream" type="text">
+          <label>User-agent (the unlock)</label><input id="cfgUa" type="text">
+        </div>
+        <div>
+          <label>Default model <span class="hint">(empty = auto-pick healthy free model)</span></label><input id="cfgDefault" type="text">
+          <label>Proxy key (empty = open)</label><input id="cfgProxyKey" type="password" autocomplete="new-password">
+          <label>Upstream Key (BYOK, optional)</label><input id="cfgUpstreamKey" type="password" autocomplete="new-password">
+          <div class="row" style="gap:8px;margin-top:2px">
+            <button type="button" class="primary" onclick="testUpstreamKey()" style="font-size:11px;padding:6px 10px">Test key</button>
+            <span class="hint mono" id="cfgAuth"></span>
+            <span class="hint" id="upstreamKeyHint" style="min-height:16px"></span>
+          </div>
+          <label>Timeout (ms)</label><input id="cfgTimeout" type="number">
+        </div>
+      </div>
+      <label>Fallback models (json array — tried in order on 429/5xx)</label>
+      <textarea id="cfgFallback"></textarea>
+      <label>Model aliases (json map — e.g. {"gpt-4o":"space-bunny-free"})</label>
+      <textarea id="cfgAliases"></textarea>
+      <div class="checkbox"><input type="checkbox" id="cfgTrust"><span>Trust <code>x-forwarded-for</code> from a reverse proxy</span></div>
+      <div class="checkbox"><input type="checkbox" id="cfgAutoSync"><span>Auto-sync models (probe upstream free models, prune dead ones)</span></div>
+      <label>Auto-sync interval (ms)</label><input id="cfgSyncMs" type="number">
+      <label>Models metadata endpoint URL</label>
+      <input id="cfgMetaEndpoint" type="text" placeholder="https://models.dev/api.json">
+      <div class="row" style="gap:10px;margin-top:4px">
+        <div style="flex:1">
+          <label>Metadata request timeout (seconds)</label>
+          <input id="cfgMetaTimeout" type="number" min="5" max="120" placeholder="30">
+        </div>
+        <div style="flex:1">
+          <label>Metadata sync interval (hours)</label>
+          <input id="cfgMetaSyncHours" type="number" min="1" max="168" placeholder="24">
+        </div>
+      </div>
+      <div class="hint" style="margin-top:-2px;margin-bottom:12px">Pulls model specs, context limits, and modalities. Saved to <code>models-dev-cache.json</code>. Trigger manually anytime via <b>Sync now</b> on the Models page.</div>
+      <label>Health-probe credentials</label>
+      <select id="cfgProbeAuth" style="width:100%">
+        <option value="auto">Auto — use Upstream Key if set, else anonymous</option>
+        <option value="anonymous">Always anonymous (public free tier)</option>
+        <option value="key">Always Upstream Key (tests own quota)</option>
+      </select>
+      <div class="checkbox"><input type="checkbox" id="cfgAutoUA"><span>Auto-track opencode releases &amp; update the User-Agent</span></div>
+      <label>User-agent refresh interval (days)</label><input id="cfgUaDays" type="number" step="0.5" min="0.1">
+      <div class="checkbox"><input type="checkbox" id="cfgInject"><span>Inject <code>x-opencode-session</code> header per client (free tier needs it)</span></div>
+      <div class="checkbox"><input type="checkbox" id="cfgRateLimit"><span>Rate-limit chat requests per client (0 = off)</span></div>
+      <div class="row" style="gap:10px;margin-top:6px">
+        <div><label>Requests / window</label><input id="cfgRateMax" type="number" min="0" style="width:120px"></div>
+        <div><label>Window (ms)</label><input id="cfgRateWindow" type="number" min="1000" style="width:140px"></div>
+      </div>
+      <label>Responses-API models (json array — patterns may end in *)</label>
+      <textarea id="cfgResponses"></textarea>
+      <div class="row" style="margin-top:22px">
+        <button class="primary" onclick="saveConfig()">Save &amp; apply</button>
+        <button onclick="reloadConfig()">Discard / reload</button>
+        <button onclick="restoreModels()" title="Re-add any model the proxy is missing (keeps your keys)">Restore model list</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab" id="tab-logs">
+    <div class="panel">
+      <h2><span class="hh">Server logs</span><button style="font-size:10.5px; padding:6px 12px" onclick="loadLogs()">Refresh</button></h2>
+      <div class="logs" id="logBox"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id)
+let key = localStorage.getItem("opencodeKey") || ""
+let config = null, manualTests = {}
+let savedUpstreamKeyMasked = ""
+
+function api(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) }
+  if (key) headers["Authorization"] = "Bearer " + key
+  if (opts.body) headers["Content-Type"] = "application/json"
+  return fetch(path, { ...opts, headers }).then(async (r) => {
+    if (r.status === 401) { showAuth(); throw new Error("unauthorized") }
+    return r.json()
+  })
+}
+
+function toast(msg, type = "ok") {
+  const t = $("toast")
+  t.textContent = msg
+  t.className = "toast show " + type
+  clearTimeout(t._h)
+  t._h = setTimeout(() => (t.className = "toast"), 2400)
+}
+function showBanner(msg) { const b = $("banner"); b.textContent = msg; b.className = "banner error" }
+function hideBanner() { $("banner").className = "banner" }
+
+function showAuth() {
+  $("authScreen").style.display = "flex"
+  $("authKey").focus()
+}
+async function submitAuth() {
+  key = $("authKey").value.trim()
+  localStorage.setItem("opencodeKey", key)
+  try {
+    await api("/api/status")
+    $("authScreen").style.display = "none"
+    toast("Unlocked")
+    refreshAll()
+  } catch {
+    toast("Wrong key", "bad")
+    key = ""
+    localStorage.removeItem("opencodeKey")
+  }
+}
+$("authKey").addEventListener("keydown", (e) => { if (e.key === "Enter") submitAuth() })
+
+function fmtTime(val) {
+  if (!val) return "–"
+  return String(val)
+}
+function fmtLogTime(val) {
+  if (!val) return ""
+  return String(val)
+}
+function fmtDur(ms) { return ms < 1000 ? ms + "ms" : (ms / 1000).toFixed(1) + "s" }
+function fmtUp(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60
+  return h > 0 ? h + "h " + m + "m" : m > 0 ? m + "m " + s + "s" : s + "s"
+}
+
+async function refreshStatus() {
+  try {
+    const st = await api("/api/status")
+    const dot = $("upstreamDot"), txt = $("upstreamText")
+    dot.className = "dot " + (st.upstreamOk ? "ok" : "bad")
+    txt.textContent = st.upstreamOk ? "upstream OK" : "upstream DOWN"
+    $("ovUpstream").textContent = st.upstream.replace(/^https?:\/\//, "")
+    $("ovUpstream").title = st.upstream
+    $("ovUpstream").dataset.host = new URL(st.upstream).host || st.upstream
+    $("ovUa").textContent = "UA: " + st.ua
+    $("ovUa").title = st.uaAutoVersion && st.uaAutoVersion !== (st.ua.split("/")[1] || "") ? "latest opencode: " + st.uaAutoVersion : ""
+    $("ovUptime").textContent = fmtUp(st.uptime)
+    $("ovTotal").textContent = st.requests.total
+    $("ovErr").textContent = st.requests.errors + " errors"
+    $("ovMin").textContent = st.requests.lastMinute
+    $("ov5m").textContent = st.requests.last5m + " in 5 min"
+    $("ovModels").textContent = st.models.total
+    $("ovAllowed").textContent = st.models.allowed + " allowed"
+    if (document.getElementById("tab-overview").classList.contains("active")) renderTable(st.recent)
+    if (document.getElementById("tab-models").classList.contains("active")) {
+      if (!config) {
+        const c = await api("/api/config").catch(() => null)
+        if (c && c.config) config = c.config
+      }
+      renderModels(st)
+    }
+    hideBanner()
+  } catch (e) {
+    if (e.message !== "unauthorized") { $("upstreamDot").className = "dot bad"; $("upstreamText").textContent = "unreachable" }
+  }
+}
+
+const PAGE_SIZE = 10
+let tablePage = 1
+function renderTable(recent) {
+  const tb = $("reqTable").querySelector("tbody")
+  const pager = $("reqPager")
+  if (!recent || !recent.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="empty">no requests yet — go make some noise.</td></tr>'
+    pager.innerHTML = ""
+    return
+  }
+  const rows = recent.slice()
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  if (tablePage > pages) tablePage = pages
+  if (tablePage < 1) tablePage = 1
+  const slice = rows.slice((tablePage - 1) * PAGE_SIZE, tablePage * PAGE_SIZE)
+  tb.innerHTML = slice.map((r) => {
+    const cls = r.status < 300 ? "ok" : r.status === 429 ? "warn" : "bad"
+    const t = r.at || r.time
+    return `<tr>
+      <td class="mono">${fmtTime(t)}</td>
+      <td class="mono">${escapeHtml(r.model)}</td>
+      <td><span class="badge ${cls}">${r.status}</span></td>
+      <td class="mono">${r.ms == null ? "—" : fmtDur(r.ms)}</td>
+      <td class="mono">${r.count || 1}</td>
+    </tr>`
+  }).join("")
+  pager.innerHTML = `
+    <button onclick="pageTable(-1)" ${tablePage <= 1 ? "disabled" : ""}>‹ prev</button>
+    <span class="pager-info">page ${tablePage} / ${pages} · ${rows.length} entries</span>
+    <button onclick="pageTable(1)" ${tablePage >= pages ? "disabled" : ""}>next ›</button>`
+}
+function pageTable(d) { tablePage += d; refreshStatus() }
+
+async function refreshModels() {
+  try {
+    const cfg = await api("/api/config")
+    if (cfg && cfg.config) config = cfg.config
+  } catch {}
+  const st = await api("/api/status")
+  renderModels(st)
+}
+
+function renderModels(st) {
+  const tb = $("modelTable").querySelector("tbody")
+  const fb = (config && Array.isArray(config.fallbackModels)) ? config.fallbackModels : []
+  const disabled = (config && Array.isArray(config.disabledModels)) ? config.disabledModels : []
+  const aliases = (config && typeof config.modelAliases === "object" && config.modelAliases !== null) ? config.modelAliases : {}
+  const servedIds = ((st && st.models && Array.isArray(st.models.served)) ? st.models.served : []).map((m) => (typeof m === "string" ? m : m.id))
+  const discoveredIds = ((st && st.models && Array.isArray(st.models.discovered)) ? st.models.discovered : []).map((m) => (typeof m === "string" ? m : m.id))
+  const dead = (st && st.sync && Array.isArray(st.sync.dead)) ? st.sync.dead : []
+  // Only show models that exist upstream (discovered/served), or are in fallback/aliases, or are explicitly disabled
+  const upstreamOrConfigured = new Set([...fb, ...servedIds, ...discoveredIds, ...Object.keys(aliases)])
+  const allKnown = [...new Set([...fb, ...disabled, ...servedIds, ...discoveredIds, ...Object.keys(aliases)])]
+  // Filter out dead upstream models, AND filter out custom models that are not upstream and not in fb/aliases
+  const list = allKnown.filter((m) => {
+    if (dead.includes(m) && !fb.includes(m) && !aliases[m]) return false
+    return true
+  })
+  const unconfigured = allKnown.filter((m) => !fb.includes(m) && !aliases[m])
+  $("modelCount").textContent = list.length + " available" + (unconfigured.length ? ` · ${unconfigured.length} not in fallback` : "")
+  if (st && st.sync) renderSync(st.sync)
+  if (!list.length) { tb.innerHTML = '<tr><td colspan="4" class="empty">no models available right now.</td></tr>'; return }
+  tb.innerHTML = list.map((m) => {
+    const sync = st && st.sync
+    const aliasTarget = aliases[m]
+    const ms = modelStatus(aliasTarget || m, sync)
+    const display = aliasTarget ? escapeHtml(m) + ' <span class="badge mut">→ ' + escapeHtml(aliasTarget) + "</span>" : escapeHtml(m)
+    const msBadge = ms ? `<span class="badge ${ms.cls}" style="margin-left:7px" tabindex="0" data-tip-title="${escapeAttr(ms.title || ms.label)}" data-tip="${escapeAttr(ms.tip)}">${ms.label}</span>` : ""
+    const isResp = ((config && config.responsesModels) || []).some((p) => (p.endsWith("*") ? m.startsWith(p.slice(0, -1)) : m === p))
+    const fmtBadge = isResp ? `<span class="badge mut" style="margin-left:6px" tabindex="0" data-tip="${escapeAttr(TIP.responses)}">responses</span>` : ""
+    const isDefault = m === (config && config.defaultModel)
+    const isConfigured = fb.includes(m) || !!aliases[m]
+    const isDisabled = disabled.includes(m)
+    const notInFallback = !fb.includes(m) && !aliases[m]
+    const notCfgBadge = isDisabled ? `<span class="badge warn" style="margin-left:6px" tabindex="0" title="Model disabled by user">disabled</span>` : (notInFallback ? `<span class="badge mut" style="margin-left:6px" tabindex="0" data-tip="${escapeAttr(TIP.notconfigured)}">not in fallback</span>` : "")
+    const addBtn = notInFallback ? `<button onclick='addModel(${jsStr(m)})'>+ enable</button>` : ""
+    return `<tr${notInFallback ? ' style="opacity:.7"' : ""}>
+      <td class="mono" style="vertical-align:middle;padding:12px 10px">
+        <div style="display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;row-gap:4px">
+          <span style="font-weight:700;letter-spacing:-.01em">${display}</span>
+          ${msBadge}
+          ${fmtBadge}
+          ${notCfgBadge}
+        </div>
+      </td>
+      <td style="vertical-align:middle;text-align:center;padding:12px 6px">
+        <input type="radio" name="defaultModel" value="${escapeAttr(m)}" ${isDefault ? "checked" : ""} onchange='setDefault(${jsStr(m)})' style="width:16px;height:16px;cursor:pointer;margin:0 auto;display:block">
+      </td>
+      <td class="mono testCell" id="tc-${escapeAttr(m)}" style="vertical-align:middle;padding:12px 10px">
+        ${(() => {
+          const mt = manualTests[m] || (aliasTarget && manualTests[aliasTarget])
+          if (mt) {
+            if (mt.gated) {
+              return `<span class="badge mut" tabindex="0" data-tip="${escapeAttr(TIP.gated)}">◦ agent-only</span>`
+            }
+            const okColor = mt.ok ? "var(--ink)" : "var(--coral)"
+            const detailHtml = mt.detail ? `<div class="hint" style="font-size:10px;line-height:1.25;margin-top:3px;word-break:break-word;max-width:280px;font-family:var(--mono);color:var(--muted)" title="${escapeAttr(String(mt.detail))}">${escapeHtml(String(mt.detail))}</div>` : ""
+            return `<div><span style="color:${okColor};font-weight:700;font-size:11px">${mt.ok ? "✓" : "✗"} ${mt.status} · ${fmtDur(mt.ms)}</span>${detailHtml}</div>`
+          }
+          const targetKey = aliasTarget || m
+          const obs = (st && st.sync && st.sync.observed && (st.sync.observed[targetKey] || st.sync.observed[m]))
+          if (obs && (obs.ok > 0 || obs.fail > 0)) {
+            const ok = obs.ok >= obs.fail
+            return `<span class="badge ${ok ? "ok" : "bad"}" style="font-size:10px">${ok ? "✓ " + obs.ok + " ok" : "✗ " + obs.fail + " fail"}</span>`
+          }
+          if (st && st.sync && Array.isArray(st.sync.working) && (st.sync.working.includes(targetKey) || st.sync.working.includes(m))) {
+            return `<span class="badge ok" style="font-size:10px">✓ ready</span>`
+          }
+          if (st && st.sync && Array.isArray(st.sync.flaky) && (st.sync.flaky.includes(targetKey) || st.sync.flaky.includes(m))) {
+            return `<span class="badge warn" style="font-size:10px">~ flaky</span>`
+          }
+          if (st && st.sync && Array.isArray(st.sync.dead) && (st.sync.dead.includes(targetKey) || st.sync.dead.includes(m))) {
+            return `<span class="badge bad" style="font-size:10px">✗ dead</span>`
+          }
+          return `<span style="color:var(--muted)">–</span>`
+        })()}
+      </td>
+      <td style="vertical-align:middle;text-align:right;padding:12px 16px 12px 6px">
+        <div style="display:inline-flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap">
+          <button style="padding:5px 11px;font-size:10px;min-width:48px" onclick='testModel(${jsStr(m)})'>Test</button>
+          ${(() => {
+            if (aliasTarget) {
+              return `<button style="padding:5px 8px;font-size:10px;background:rgba(235,94,85,.15);color:var(--coral);border:1px solid rgba(235,94,85,.3)" title="Delete alias completely" onclick='deleteAlias(${jsStr(m)})'>✕</button>`
+            }
+            if (isDisabled) {
+              return `<button style="padding:5px 9px;font-size:10px" onclick='addModel(${jsStr(m)})'>+ enable</button><button style="padding:5px 8px;font-size:10px;background:rgba(235,94,85,.15);color:var(--coral);border:1px solid rgba(235,94,85,.3)" title="Delete model completely" onclick='deleteModel(${jsStr(m)})'>✕</button>`
+            }
+            if (notInFallback) {
+              return `<button style="padding:5px 9px;font-size:10px" onclick='addModel(${jsStr(m)})'>+ add</button>`
+            }
+            return `<button style="padding:5px 8px;font-size:10px;background:var(--paper2);color:var(--ink)" title="Disable model" onclick='removeModel(${jsStr(m)})'>✕</button>`
+          })()}
+        </div>
+      </td>
+    </tr>`
+  }).join("")
+  if (st && st.models) $("ovModels").textContent = st.models.total || list.length
+}
+
+async function setDefault(m) {
+  const cfg = await api("/api/config")
+  cfg.config.defaultModel = m
+  await api("/api/config", { method: "PUT", body: JSON.stringify(cfg.config) })
+  toast("Default model: " + m)
+  refreshModels()
+}
+
+async function testModel(m) {
+  const cell = $("tc-" + m)
+  if (cell) cell.innerHTML = `<span class="badge warn" style="font-size:10px">testing…</span>`
+  try {
+    const r = await api("/api/test", { method: "POST", body: JSON.stringify({ model: m }) })
+    manualTests[m] = { ...r, at: Date.now() }
+    if (cell) {
+      if (r.gated) {
+        cell.innerHTML = `<span class="badge mut" tabindex="0" data-tip="${escapeAttr(TIP.gated)}">◦ agent-only</span> <span class="hint">agent-only</span>`
+      } else {
+        const okColor = r.ok ? "var(--ink)" : "var(--coral)"
+        const detailHtml = r.detail ? `<div class="hint" style="font-size:10px;line-height:1.25;margin-top:3px;word-break:break-word;max-width:280px;font-family:var(--mono);color:var(--muted)" title="${escapeAttr(String(r.detail))}">${escapeHtml(String(r.detail))}</div>` : ""
+        cell.innerHTML = `<div><span style="color:${okColor};font-weight:700;font-size:11px">${r.ok ? "✓" : "✗"} ${r.status} · ${fmtDur(r.ms)}</span>${detailHtml}</div>`
+      }
+    }
+    toast(r.ok ? m + " works (" + r.status + " · " + fmtDur(r.ms) + ")" : m + " failed (" + r.status + ")", r.ok ? "ok" : "bad")
+  } catch {
+    if (cell) cell.innerHTML = `<span class="badge bad" style="font-size:10px">error</span>`
+  }
+}
+
+// Tooltip copy for each health state — kept short so it always fits the bubble.
+const TIP = {
+  live: "A real request through this proxy just succeeded.",
+  ok: "Health probe got a clean 200 upstream.",
+  gated: "Free tier takes real agent traffic only. A probe can't confirm it.",
+  flaky: "Temporary trouble — timeout or 5xx. Kept, it recovers.",
+  limited: "Upstream returned 429. Quota refills.",
+  dead: "Upstream says it's gone (404). Only state that removes it.",
+  untested: "No health check yet. Hit “Sync now”.",
+  responses: "Served on /v1/responses. Proxy translates it.",
+  notconfigured: "Upstream has it, your list doesn't.",
+  syncing: "Probing every free model right now.",
+  syncnever: "Auto-sync has not run yet.",
+  syncdone: "Last health check. Agent-only models are fine — a probe just can't confirm them.",
+}
+
+function modelStatus(m, sync) {
+  if (sync && sync.observed && sync.observed[m]) {
+    const o = sync.observed[m]
+    if (o.ok > o.fail) return { cls: "ok", label: "ok (live traffic)", title: "live traffic", tip: TIP.live }
+  }
+  if (!sync || !sync.at) return { cls: "mut", label: "untested", tip: TIP.untested }
+  if (sync.working?.includes(m)) return { cls: "ok", label: "ok", tip: TIP.ok }
+  if (sync.rateLimited?.includes(m)) return { cls: "warn", label: "rate-limited", tip: TIP.limited }
+  if (sync.gated?.includes(m)) return { cls: "mut", label: "agent-only", tip: TIP.gated }
+  if (sync.flaky?.includes(m)) return { cls: "warn", label: "flaky", tip: TIP.flaky }
+  if (sync.dead?.includes(m)) return { cls: "bad", label: "dead", tip: TIP.dead }
+  return { cls: "mut", label: "untested", tip: TIP.untested }
+}
+
+function renderSync(s) {
+  const el = $("syncStatus")
+  if (!el) return
+  // The label itself is long, so the tooltip always uses a short fixed title.
+  el.setAttribute("data-tip-title", "auto-sync")
+  el.setAttribute("tabindex", "0")
+  if (s.running) { el.textContent = "auto-sync: probing…"; el.className = "badge warn"; el.setAttribute("data-tip", TIP.syncing); return }
+  if (!s.at) { el.textContent = "auto-sync: never"; el.className = "badge mut"; el.setAttribute("data-tip", TIP.syncnever); return }
+  const ago = fmtUp(Math.max(1, Math.floor((Date.now() - s.at) / 1000))) + " ago"
+  const workingLen = (s.working || []).length
+  const rateLen = (s.rateLimited || []).length
+  const gatedLen = (s.gated || []).length
+  const flakyLen = (s.flaky || []).length
+  const deadLen = (s.dead || []).length
+  el.textContent = `auto-sync: ${ago} · ${workingLen} ok · ${rateLen} rate-limited · ${gatedLen} agent-only · ${flakyLen} flaky · ${deadLen} dead`
+  el.className = "badge " + (s.ok ? (deadLen ? "warn" : "ok") : "bad")
+  let tipDetails = TIP.syncdone
+  if (deadLen) tipDetails += "\n\nDead: " + s.dead.join(", ")
+  if (flakyLen) tipDetails += "\n\nFlaky: " + s.flaky.join(", ")
+  el.setAttribute("data-tip", tipDetails)
+}
+
+async function syncNow() {
+  const btn = $("syncBtn")
+  btn.disabled = true
+  btn.textContent = "syncing…"
+  try {
+    const r = await api("/api/sync", { method: "POST" })
+    toast(r.ok ? "Sync started — probing models…" : "Sync failed: " + (r.error || ""), r.ok ? "ok" : "bad")
+  } catch { toast("Sync failed", "bad") }
+  // Poll until sync probe completes so the UI updates live
+  const poll = async () => {
+    await refreshModels()
+    const st = await api("/api/status").catch(() => null)
+    if (st && st.sync && st.sync.running) {
+      setTimeout(poll, 1000)
+    } else {
+      btn.disabled = false
+      btn.textContent = "⟳ Sync now"
+      await refreshModels()
+    }
+  }
+  setTimeout(poll, 1000)
+}
+
+async function testUpstreamKey() {
+  const hint = $("upstreamKeyHint")
+  hint.textContent = "testing…"
+  const upstreamKey = $("cfgUpstreamKey").value
+  const body = { model: $("cfgDefault").value.trim() || (config && config.fallbackModels ? config.fallbackModels[0] : "") }
+  if (upstreamKey && upstreamKey !== savedUpstreamKeyMasked) body.upstreamKey = upstreamKey
+  try {
+    const r = await api("/api/test", { method: "POST", body: JSON.stringify(body) })
+    if (r.gated) {
+      hint.innerHTML = '<span style="color:var(--mut)">◦ key accepted, model is agent-only</span>'
+      toast("Key reached the free tier (model is agent-only)", "ok")
+    } else {
+      hint.innerHTML = r.ok
+        ? '<span style="color:var(--ink)">✓ works (' + r.model + ")</span>"
+        : '<span style="color:var(--coral)">✗ ' + r.status + " " + escapeHtml(String(r.detail || "").slice(0, 80)) + "</span>"
+      toast(r.ok ? "Key works: " + r.model : "Key rejected (" + r.status + ")", r.ok ? "ok" : "bad")
+    }
+  } catch (e) { hint.textContent = "test failed"; toast("Test failed", "bad") }
+}
+
+async function addModel(preset) {
+  const m = (preset || $("newModel").value).trim()
+  if (!m) return
+  const cfg = await api("/api/config")
+  if (!Array.isArray(cfg.config.fallbackModels)) cfg.config.fallbackModels = []
+  if (Array.isArray(cfg.config.disabledModels)) {
+    cfg.config.disabledModels = cfg.config.disabledModels.filter((x) => x !== m)
+  }
+  if (!cfg.config.fallbackModels.includes(m)) cfg.config.fallbackModels.push(m)
+  await api("/api/config", { method: "PUT", body: JSON.stringify(cfg.config) })
+  $("newModel").value = ""
+  toast("Enabled " + m)
+  refreshModels()
+}
+
+async function removeModel(m) {
+  const cfg = await api("/api/config")
+  if (!Array.isArray(cfg.config.disabledModels)) cfg.config.disabledModels = []
+  if (!cfg.config.disabledModels.includes(m)) cfg.config.disabledModels.push(m)
+  cfg.config.fallbackModels = cfg.config.fallbackModels.filter((x) => x !== m)
+  if (cfg.config.defaultModel === m) cfg.config.defaultModel = cfg.config.fallbackModels[0] || ""
+  await api("/api/config", { method: "PUT", body: JSON.stringify(cfg.config) })
+  toast("Disabled " + m)
+  refreshModels()
+}
+
+async function deleteModel(m) {
+  const cfg = await api("/api/config")
+  if (Array.isArray(cfg.config.disabledModels)) {
+    cfg.config.disabledModels = cfg.config.disabledModels.filter((x) => x !== m)
+  }
+  if (Array.isArray(cfg.config.fallbackModels)) {
+    cfg.config.fallbackModels = cfg.config.fallbackModels.filter((x) => x !== m)
+  }
+  if (cfg.config.modelAliases && cfg.config.modelAliases[m]) {
+    delete cfg.config.modelAliases[m]
+  }
+  if (cfg.config.defaultModel === m) cfg.config.defaultModel = cfg.config.fallbackModels[0] || ""
+  await api("/api/config", { method: "PUT", body: JSON.stringify(cfg.config) })
+  toast("Deleted " + m, "ok")
+  refreshModels()
+}
+
+async function deleteAlias(m) {
+  const cfg = await api("/api/config")
+  if (cfg.config.modelAliases && cfg.config.modelAliases[m]) {
+    delete cfg.config.modelAliases[m]
+  }
+  await api("/api/config", { method: "PUT", body: JSON.stringify(cfg.config) })
+  toast("Removed alias " + m, "ok")
+  refreshModels()
+}
+
+async function populateConfigForm() {
+  if (!config) config = (await api("/api/config")).config
+  savedUpstreamKeyMasked = config.defaultUpstreamKey || ""
+  $("cfgHost").value = config.host
+  $("cfgPort").value = config.port
+  $("cfgUpstream").value = config.upstream
+  $("cfgUa").value = config.ua
+  $("cfgDefault").value = config.defaultModel
+  $("cfgDefault").placeholder = "(auto)"
+  $("cfgProxyKey").value = config.proxyKey === "••••••••" ? "" : config.proxyKey
+  $("cfgUpstreamKey").value = savedUpstreamKeyMasked
+  $("cfgTimeout").value = config.timeoutMs
+  $("cfgFallback").value = JSON.stringify(config.fallbackModels, null, 2)
+  $("cfgAliases").value = JSON.stringify(config.modelAliases, null, 2)
+  $("cfgTrust").checked = !!config.trustForwarded
+  $("cfgAutoSync").checked = config.autoSync !== false
+  $("cfgSyncMs").value = config.autoSyncIntervalMs ?? 3600000
+  $("cfgMetaEndpoint").value = config.metaEndpoint || "https://models.dev/api.json"
+  $("cfgMetaTimeout").value = config.metaTimeoutSec || 30
+  $("cfgMetaSyncHours").value = config.metaSyncHours || 24
+  $("cfgProbeAuth").value = ["auto", "key", "anonymous"].includes(config.probeAuth) ? config.probeAuth : "auto"
+  $("cfgAutoUA").checked = config.autoUA !== false
+  $("cfgUaDays").value = config.uaRefreshDays != null ? config.uaRefreshDays : (config.uaRefreshMs ? +(config.uaRefreshMs / 86400000).toFixed(2) : 1)
+  $("cfgInject").checked = config.injectSession !== false
+  $("cfgRateLimit").checked = Number(config.rateLimitMax) > 0
+  $("cfgRateMax").value = config.rateLimitMax ?? 0
+  $("cfgRateWindow").value = config.rateLimitWindowMs ?? 60000
+  $("cfgResponses").value = JSON.stringify(config.responsesModels ?? [], null, 2)
+  try {
+    const st = await api("/api/status")
+    const auth = st.auth || {}
+    const modeLabel =
+      auth.mode === "proxy+byok" ? "proxy key + your upstream key"
+      : auth.mode === "byok" ? "your upstream key"
+      : auth.mode === "proxy" ? "proxy key"
+      : "anonymous public"
+    const eff = st.effectiveDefault ? " · auto→" + st.effectiveDefault : ""
+    $("cfgDefault").placeholder = eff ? "auto → " + st.effectiveDefault : "(auto)"
+    $("cfgAuth").textContent = "auth: " + modeLabel + (auth.upstreamKey ? " (" + auth.upstreamKey + ")" : "") + eff
+  } catch {}
+}
+
+async function saveConfig() {
+  const body = {
+    host: $("cfgHost").value.trim() || "127.0.0.1",
+    port: Number($("cfgPort").value || 8787),
+    upstream: $("cfgUpstream").value.trim(),
+    ua: $("cfgUa").value.trim(),
+    defaultModel: $("cfgDefault").value.trim(),
+    proxyKey: $("cfgProxyKey").value,
+    timeoutMs: Number($("cfgTimeout").value || 120000),
+    fallbackModels: JSON.parse($("cfgFallback").value || "[]"),
+    modelAliases: JSON.parse($("cfgAliases").value || "{}"),
+    trustForwarded: $("cfgTrust").checked,
+    autoSync: $("cfgAutoSync").checked,
+    autoSyncIntervalMs: Number($("cfgSyncMs").value || 3600000),
+    metaEndpoint: $("cfgMetaEndpoint").value.trim() || "https://models.dev/api.json",
+    metaTimeoutSec: Number($("cfgMetaTimeout").value || 30),
+    metaSyncHours: Number($("cfgMetaSyncHours").value || 24),
+    probeAuth: $("cfgProbeAuth").value,
+    autoUA: $("cfgAutoUA").checked,
+    uaRefreshDays: Number($("cfgUaDays").value || 1),
+    uaRefreshMs: Math.round(Number($("cfgUaDays").value || 1) * 86400000),
+    injectSession: $("cfgInject").checked,
+    rateLimitMax: $("cfgRateLimit").checked ? Number($("cfgRateMax").value || 0) : 0,
+    rateLimitWindowMs: Number($("cfgRateWindow").value || 60000),
+  }
+  try { body.responsesModels = JSON.parse($("cfgResponses").value || "[]") } catch { toast("Invalid JSON — responses models", "bad"); return }
+  if ($("cfgUpstreamKey").value !== savedUpstreamKeyMasked) body.defaultUpstreamKey = $("cfgUpstreamKey").value
+  try {
+    const r = await api("/api/config", { method: "PUT", body: JSON.stringify(body) })
+    if (r && r.config) config = r.config
+    toast("Saved & applied", "ok")
+    await refreshModels()
+    await refreshStatus()
+  } catch (e) { toast("Failed to save config: " + (e.message || "check JSON"), "bad") }
+}
+
+async function restoreModels() {
+  try {
+    const r = await api("/api/config", { method: "POST", body: JSON.stringify({ fallbackModels: true }) })
+    config = r.config
+    toast("Model list restored (" + config.fallbackModels.length + " models) — syncing now")
+    await api("/api/sync", { method: "POST" })
+    refreshAll()
+  } catch { toast("Restore failed", "bad") }
+}
+
+async function reloadConfig() { config = null; await populateConfigForm(); toast("Reloaded from file") }
+
+async function loadLogs() {
+  if (!document.getElementById("tab-logs").classList.contains("active")) return
+  try {
+    const r = await api("/api/logs?n=300")
+    const box = $("logBox")
+    box.innerHTML = r.logs.map((l) => `<div class="line"><span class="ts">${escapeHtml(fmtLogTime(l.at))}</span>${escapeHtml(l.msg)}</div>`).join("") || '<div class="empty">No logs</div>'
+    box.scrollTop = box.scrollHeight
+  } catch {}
+}
+
+function positionIndicator() {
+  const nav = $("nav"), ind = $("navIndicator")
+  const act = nav.querySelector("button.active")
+  if (!act) return
+  ind.style.width = act.offsetWidth + "px"
+  ind.style.transform = `translateX(${act.offsetLeft}px)`
+}
+window.addEventListener("resize", positionIndicator)
+
+function switchTab(name) {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name))
+  document.querySelectorAll(".tab").forEach((t) => {
+    const is = t.id === "tab-" + name
+    if (is) {
+      t.classList.remove("leaving")
+      t.classList.add("active")
+    } else if (t.classList.contains("active")) {
+      t.classList.remove("active")
+      t.classList.add("leaving")
+      setTimeout(() => t.classList.remove("leaving"), 340)
+    }
+  })
+  positionIndicator()
+  if (name === "config") populateConfigForm()
+  if (name === "logs") loadLogs()
+  if (name === "models") { config = null; refreshModels() }
+  if (name === "overview") refreshStatus()
+}
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)))
+
+function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])) }
+
+// --- badge tooltip (delegated, so it survives the 4s table re-render) ---
+// Purpose-built for this dashboard. One accent per badge tone, tuned dark
+// enough to read on the paper background. Title reuses the badge's own label
+// so the two never drift apart.
+const ZTIP_TONE = { ok: "#4d6b00", warn: "#6b3fbf", bad: "#d63a1c", mut: "#7d7461" }
+let ztipEl = null
+function ztipHide() {
+  if (!ztipEl) return
+  const el = ztipEl
+  ztipEl = null
+  el.classList.remove("open")
+  setTimeout(() => el.remove(), 220)
+}
+function ztipShow(target) {
+  const body = target.getAttribute("data-tip")
+  if (!body) return
+  ztipHide()
+  const tone = (target.className.match(/badge\s+(\w+)/) || [])[1] || "mut"
+  const bubble = document.createElement("div")
+  bubble.className = "ztip"
+  bubble.setAttribute("role", "tooltip")
+  bubble.style.setProperty("--ztip-accent", ZTIP_TONE[tone] || ZTIP_TONE.mut)
+  const title = document.createElement("div")
+  title.className = "ztip-title"
+  title.textContent = target.getAttribute("data-tip-title") || target.textContent.trim()
+  const text = document.createElement("div")
+  text.className = "ztip-body"
+  text.textContent = body
+  bubble.append(title, text)
+  target.appendChild(bubble)
+  ztipEl = bubble
+  // Flip below when there is not enough room above, then keep it on screen.
+  if (target.getBoundingClientRect().top < 150) bubble.classList.add("below")
+  const half = bubble.offsetWidth / 2
+  const r = target.getBoundingClientRect()
+  const shift = Math.round(r.left + r.width / 2 - (bubble.getBoundingClientRect().left + half))
+  if (shift) bubble.style.marginLeft = shift + "px"
+  requestAnimationFrame(() => bubble.classList.add("open"))
+}
+document.addEventListener("mouseover", (e) => {
+  const t = e.target.closest && e.target.closest("[data-tip]")
+  if (t) ztipShow(t)
+})
+document.addEventListener("mouseout", (e) => {
+  const t = e.target.closest && e.target.closest("[data-tip]")
+  if (t && (!e.relatedTarget || !t.contains(e.relatedTarget))) ztipHide()
+})
+document.addEventListener("focusin", (e) => {
+  const t = e.target.closest && e.target.closest("[data-tip]")
+  if (t) ztipShow(t)
+})
+document.addEventListener("focusout", ztipHide)
+window.addEventListener("scroll", ztipHide, true)
+window.addEventListener("resize", ztipHide)
+
+function escapeAttr(s) { return escapeHtml(s) }
+// Safe embedding of a JS string into a single-quoted HTML attribute: HTML attribute
+// parsing does not honor \" as an escape, so JSON.stringify alone breaks double-quoted
+// attributes; \x27 and \u0026 survive attribute parsing and decode inside the JS string.
+function jsStr(s) {
+  return JSON.stringify(String(s ?? "")).replace(/'/g, "\\x27").replace(/&/g, "\\u0026")
+}
+
+function updateEndpointBanner() {
+  const el = $("endpointUrl")
+  if (el) el.textContent = window.location.origin + "/v1"
+}
+function copyEndpoint() {
+  const url = window.location.origin + "/v1"
+  const btn = $("copyBtn")
+  const setCopied = () => {
+    if (btn) {
+      const origText = btn.textContent
+      btn.textContent = "✓ Copied!"
+      btn.style.background = "#10b981"
+      btn.style.borderColor = "#10b981"
+      setTimeout(() => {
+        btn.textContent = origText
+        btn.style.background = ""
+        btn.style.borderColor = ""
+      }, 2000)
+    }
+    toast("Copied URL: " + url, "ok")
+  }
+
+  // 1. Try modern clipboard API
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(url).then(setCopied).catch(() => fallbackCopy(url, setCopied))
+  } else {
+    // 2. HTTP / non-secure context fallback (textarea execCommand)
+    fallbackCopy(url, setCopied)
+  }
+}
+function fallbackCopy(text, cb) {
+  try {
+    const ta = document.createElement("textarea")
+    ta.value = text
+    ta.style.position = "fixed"
+    ta.style.top = "-9999px"
+    ta.style.left = "-9999px"
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    const ok = document.execCommand("copy")
+    document.body.removeChild(ta)
+    if (ok) cb(); else toast(text, "ok")
+  } catch {
+    toast(text, "ok")
+  }
+}
+
+async function refreshAll() {
+  updateEndpointBanner()
+  try { await refreshStatus(); await refreshModels() } catch (e) { if (e.message === "unauthorized") showAuth() }
+}
+
+if (key) {
+  refreshAll()
+  setTimeout(positionIndicator, 20)
+  setInterval(refreshStatus, 4000)
+  setInterval(loadLogs, 8000)
+} else {
+  api("/api/status").then(() => {
+    refreshAll()
+    setTimeout(positionIndicator, 20)
+    setInterval(refreshStatus, 4000)
+    setInterval(loadLogs, 8000)
+  }).catch(() => showAuth())
+}
+</script>
+</body>
+</html>

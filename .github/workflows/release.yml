@@ -1,0 +1,174 @@
+name: Release & Docker Builds
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-binaries:
+    name: Build & Release Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - os: linux
+            arch: amd64
+            output: opencode-router-linux-amd64
+          - os: linux
+            arch: arm64
+            output: opencode-router-linux-arm64
+          - os: linux
+            arch: arm
+            goarm: 7
+            output: opencode-router-linux-armv7
+          - os: linux
+            arch: arm
+            goarm: 5
+            output: opencode-router-linux-armv5
+          # MIPS Routers (OpenWrt)
+          - os: linux
+            arch: mipsle
+            gomips: softfloat
+            output: opencode-router-openwrt-mipsle-softfloat
+          - os: linux
+            arch: mipsle
+            gomips: hardfloat
+            output: opencode-router-openwrt-mipsle-hardfloat
+          - os: linux
+            arch: mips
+            gomips: softfloat
+            output: opencode-router-openwrt-mips-softfloat
+          # macOS
+          - os: darwin
+            arch: amd64
+            output: opencode-router-darwin-amd64
+          - os: darwin
+            arch: arm64
+            output: opencode-router-darwin-arm64
+          # Windows
+          - os: windows
+            arch: amd64
+            output: opencode-router-windows-amd64.exe
+          - os: windows
+            arch: arm64
+            output: opencode-router-windows-arm64.exe
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build Binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          GOARM: ${{ matrix.goarm }}
+          GOMIPS: ${{ matrix.gomips }}
+          CGO_ENABLED: 0
+        run: |
+          go build -trimpath -ldflags="-s -w" -o "${{ matrix.output }}" .
+
+      - name: Package Archive
+        shell: bash
+        run: |
+          tag="${{ matrix.os }}-${{ matrix.arch }}"
+          [ -n "${{ matrix.goarm }}" ] && tag="${tag}v${{ matrix.goarm }}"
+          [ -n "${{ matrix.gomips }}" ] && tag="${tag}-${{ matrix.gomips }}"
+          pkg_name="opencode-router-${tag}"
+
+          mkdir -p dist/"$pkg_name"/public dist/"$pkg_name"/assets
+          
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            cp "${{ matrix.output }}" dist/"$pkg_name"/opencode-router.exe
+          else
+            cp "${{ matrix.output }}" dist/"$pkg_name"/opencode-router
+            chmod +x dist/"$pkg_name"/opencode-router
+          fi
+
+          cp -r public/* dist/"$pkg_name"/public/
+          cp -r assets/* dist/"$pkg_name"/assets/
+          rm -rf dist/"$pkg_name"/assets/screenshots
+          cp base_tools.json base_tools_muse.json README.md dist/"$pkg_name"/
+
+          cd dist
+          zip -r "${pkg_name}.zip" "$pkg_name"
+          cd ..
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: dist/*.zip
+
+  docker:
+    name: Build & Publish Multi-Arch Docker Image
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      - name: Build & Push Multi-Arch Image (linux/amd64, linux/arm64, linux/arm/v7)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-binaries, docker]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Download all built archives
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
