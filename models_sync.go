@@ -2,13 +2,14 @@ package main
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
-		"regexp"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -147,7 +148,7 @@ func fetchModels() ([]map[string]interface{}, bool) {
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := getUpstreamClient(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != 200 {
 		if resp != nil {
@@ -419,7 +420,7 @@ func probeModelUpstream(id string, auth string, session string) (*http.Response,
 	}
 	req.Header = headers
 
-	client := &http.Client{Timeout: time.Duration(timeout) * time.Millisecond}
+	client := getUpstreamClient(time.Duration(timeout) * time.Millisecond)
 	resp, err := client.Do(req)
 	return resp, format, err
 }
@@ -431,7 +432,6 @@ func syncModels() {
 		return
 	}
 	syncState.running = true
-	syncState.at = time.Now().UnixMilli()
 	start := time.Now()
 	syncStateMu.Unlock()
 
@@ -450,7 +450,7 @@ func syncModels() {
 	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := getUpstreamClient(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		finishSyncError(err.Error(), start)
@@ -520,26 +520,25 @@ func syncModels() {
 			sessID := genSessionID()
 			r, _, err := probeModelUpstream(id, auth, sessID)
 
-			mu.Lock()
-			defer mu.Unlock()
-
 			if err != nil {
 				modelHealthMu.Lock()
 				modelHealth[id]++
 				fails := modelHealth[id]
 				modelHealthMu.Unlock()
+
+				mu.Lock()
 				if fails >= 3 {
 					dead = append(dead, id)
 					removeFromCurrent[id] = true
 				} else {
 					flaky = append(flaky, id)
 				}
+				mu.Unlock()
 				return
 			}
 			defer r.Body.Close()
 
 			bodyBytes, _ := io.ReadAll(r.Body)
-			_ = string(bodyBytes)
 
 			var j struct {
 				Type  string `json:"type"`
@@ -554,6 +553,9 @@ func syncModels() {
 			if hasErrObj || r.StatusCode >= 400 {
 				bodyErr = strings.TrimSpace(string(bodyBytes) + " " + bodyErr)
 			}
+
+			mu.Lock()
+			defer mu.Unlock()
 
 			if r.StatusCode == 200 && !hasErrObj {
 				working = append(working, id)
@@ -646,6 +648,7 @@ func syncModels() {
 	syncState.ok = true
 	syncState.ms = time.Since(start).Milliseconds()
 	syncState.running = false
+	syncState.at = time.Now().UnixMilli()
 	syncStateMu.Unlock()
 
 	// Invalidate model cache
@@ -657,7 +660,6 @@ func syncModels() {
 
 func finishSyncError(errMsg string, start time.Time) {
 	syncStateMu.Lock()
-	syncState.ok = false
 	syncState.error = errMsg
 	syncState.ms = time.Since(start).Milliseconds()
 	syncState.running = false
@@ -689,15 +691,26 @@ func startSyncScheduler() {
 			go syncModels()
 		}
 
-		ticker := time.NewTicker(30 * time.Minute)
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
 			go syncModelsDevMetadata(false)
 			cfgMu.RLock()
 			autoSync := cfg.AutoSync
+			interval := int64(cfg.AutoSyncIntervalMs)
 			cfgMu.RUnlock()
+			if interval <= 0 {
+				interval = 1800000
+			}
 			if autoSync {
-				syncModels()
+				syncStateMu.Lock()
+				lastAt := syncState.at
+				running := syncState.running
+				syncStateMu.Unlock()
+				now := time.Now().UnixMilli()
+				if !running && (now-lastAt >= interval) {
+					syncModels()
+				}
 			}
 		}
 	}()
@@ -720,7 +733,6 @@ func recordObserved(model string, ok bool) {
 		return
 	}
 	observedMu.Lock()
-	defer observedMu.Unlock()
 	cur, exists := observed[model]
 	if !exists {
 		cur = map[string]int64{"ok": 0, "fail": 0, "last": 0}
@@ -732,6 +744,7 @@ func recordObserved(model string, ok bool) {
 		cur["fail"]++
 	}
 	cur["last"] = time.Now().UnixMilli()
+	observedMu.Unlock()
 }
 
 func getObservedCopy() map[string]map[string]int64 {
@@ -815,31 +828,53 @@ func savePersistedSync() {
 }
 
 func loadPersistedSync() {
-	b, err := os.ReadFile(syncStateFilePath())
+	pPath := syncStateFilePath()
+	b, err := os.ReadFile(pPath)
 	if err != nil {
+		log.Printf("sync-cache: no cache file at %s, triggering fresh sync", pPath)
+		go syncModels()
 		return
 	}
 	var p PersistedSyncData
-	if err := json.Unmarshal(b, &p); err != nil {
+	if err := json.Unmarshal(b, &p); err != nil || p.At <= 0 {
+		log.Printf("sync-cache: invalid/corrupt cache file at %s (%v), triggering fresh sync", pPath, err)
+		go syncModels()
 		return
+	}
+
+	// Filter out invalid/empty strings
+	cleanList := func(list []string) []string {
+		var res []string
+		for _, s := range list {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				res = append(res, s)
+			}
+		}
+		return emptyIfNil(res)
 	}
 
 	syncStateMu.Lock()
 	syncState.at = p.At
 	syncState.ok = p.Ok
-	syncState.working = emptyIfNil(p.Working)
-	syncState.rateLimited = emptyIfNil(p.RateLimited)
-	syncState.gated = emptyIfNil(p.Gated)
-	syncState.flaky = emptyIfNil(p.Flaky)
-	syncState.dead = emptyIfNil(p.Dead)
+	syncState.working = cleanList(p.Working)
+	syncState.rateLimited = cleanList(p.RateLimited)
+	syncState.gated = cleanList(p.Gated)
+	syncState.flaky = cleanList(p.Flaky)
+	syncState.dead = cleanList(p.Dead)
 	syncState.ms = p.Ms
+	syncState.running = false
 	syncStateMu.Unlock()
 
 	if p.Observed != nil {
 		observedMu.Lock()
 		for k, v := range p.Observed {
-			observed[k] = v
+			k = strings.TrimSpace(k)
+			if k != "" && v != nil {
+				observed[k] = v
+			}
 		}
 		observedMu.Unlock()
 	}
+	log.Printf("sync-cache: loaded %d working, %d dead, at=%d from %s", len(syncState.working), len(syncState.dead), p.At, pPath)
 }

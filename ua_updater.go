@@ -54,7 +54,7 @@ func refreshUA(force bool) string {
 	}
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := getUpstreamClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return uaAutoState.version

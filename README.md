@@ -5,7 +5,7 @@
   # OpenCode Router
 
   **High-performance, ultra-lightweight AI model gateway and proxy engine written in Go.**  
-  *Unlocks official upstream models with sub-millisecond overhead, automatic failover, and full OpenAI compatibility.*
+  *Unlocks official upstream models with sub-millisecond overhead, full OpenAI & Anthropic API compatibility, and an embedded WebUI.*
 
   <p>
     <a href="https://github.com/G-Aman/opencode-router/releases"><img src="https://img.shields.io/github/v/release/G-Aman/opencode-router?style=flat-square&color=0284c7" alt="Latest Release"></a>
@@ -21,12 +21,14 @@
 
 ## ⚡ Highlights
 
-- **Near-Zero Footprint:** Compiled static Go binary consuming **< 10 MB RAM** and **0.0% idle CPU**. Runs smoothly on single-board computers and OpenWrt routers with as little as 64 MB RAM.
-- **Client Runtime Mimic:** Seamlessly emulates official client headers and request envelopes to ensure 100% upstream model availability.
-- **OpenAI `/v1` Drop-in Replacement:** Standard `/v1/chat/completions` and `/v1/models` endpoints compatible with Cursor, Continue, Cline, LibreChat, OpenAI SDKs, and OpenAI-compatible tools.
-- **Smart Model Synchronization:** Continuously tracks and syncs healthy free-tier and contributor models from upstream registries without requiring service restarts.
-- **Resilient Fallback Engine:** Automatic real-time cascading failover to alternate models when an upstream endpoint hits rate limits (429) or transient downtime (5xx).
-- **Embedded Control Dashboard:** Clean, responsive WebUI for real-time latency inspection, traffic monitoring, one-click API base URL copying, and dynamic configuration.
+- **Near-Zero Footprint:** Compiled static Go binary consuming **< 13 MB RAM** and **0.0% idle CPU**. Runs smoothly on single-board computers and OpenWrt routers with as little as 64 MB RAM.
+- **Dual OpenAI & Anthropic Compatibility:** Native support for both standard `/v1/chat/completions` and `/v1/messages` (Claude Code, Cursor, Cline, LibreChat, OpenAI SDK, Anthropic SDK).
+- **Tool Calling & Vision Support:** Full streaming & non-streaming support for Anthropic `tool_use` / `tool_result`, OpenAI function calling, and base64 multimodal vision inputs.
+- **Outbound HTTP & SOCKS5 Proxy:** Built-in network routing through HTTP, HTTPS, SOCKS5, and SOCKS5h proxies with optional authentication.
+- **Client Runtime Mimic:** Emulates official OpenCode CLI headers, preambles, and tool definitions to ensure 100% upstream model availability (including gated models like `mimo-*` and `nemotron-*`).
+- **Responses Protocol Bridging:** Transparently bridges upstream SSE `/responses` models (`muse-*`) to standard client formats.
+- **Smart Health Probing & Sync:** Continuous background health checks and model synchronization with zero runtime disk I/O on live traffic.
+- **Embedded Control Dashboard:** Clean, responsive WebUI for real-time latency inspection, model catalog testing, one-click API URL copying, and dynamic configuration.
 
 ---
 
@@ -110,41 +112,7 @@ services:
       - ./data:/app/data
 ```
 
-### 3. Running Inside Existing CLIProxy / Docker Containers
-
-If you are running **CLIProxyAPI** (or other gateway containers) and want OpenCode Router to run as a sidecar process directly inside the container without creating separate network boundaries:
-
-1. **Mount the extracted release directory** into your container (for example under `/CLIProxyAPI/plugins/opencode-router`):
-   ```yaml
-   volumes:
-     - /path/to/opencode-router:/CLIProxyAPI/plugins/opencode-router
-   ```
-
-2. **Override the container startup command** to launch OpenCode Router in the background before executing `CLIProxyAPI`:
-   ```yaml
-   command: ["sh", "-c", "/CLIProxyAPI/plugins/opencode-router/start.sh && exec ./CLIProxyAPI"]
-   ```
-
-3. **In Docker Run CLI**:
-   ```bash
-   docker run -d \
-     --name cliproxy \
-     -p 8000:8000 \
-     -p 8787:8787 \
-     -v /opt/opencode-router:/CLIProxyAPI/plugins/opencode-router \
-     my-cliproxy-image:latest \
-     sh -c "/CLIProxyAPI/plugins/opencode-router/start.sh && exec ./CLIProxyAPI"
-   ```
-   > **Note on Port 8787:** Exposing `-p 8787:8787` is optional. Keep it exposed if you wish to access the OpenCode Router WebUI directly in your browser (`http://<host-ip>:8787/`) for real-time monitoring and model inspection.
-
-4. **Connect in CLIProxy WebUI**:
-   - Go to your CLIProxy management WebUI.
-   - Add a new **Custom OpenAI Provider**:
-     - **Base URL**: `http://127.0.0.1:8787/v1`
-     - **API Key**: Leave empty (if `proxyKey` is default) or enter your configured key.
-   - Now CLIProxy routes directly to OpenCode Router via internal localhost loopback with zero network overhead.
-
-### 4. Build from Source
+### 3. Build from Source
 
 Requirements: Go 1.22+
 
@@ -157,53 +125,59 @@ go build -trimpath -ldflags="-s -w" -o opencode-router .
 
 ---
 
-## 💻 Supported Target Platforms
-
-OpenCode Router compiles to standalone, statically linked binaries with zero shared library dependencies:
-
-| Platform | Architecture | Supported Targets |
-| :--- | :--- | :--- |
-| **Linux** | `amd64`, `arm64`, `armv7`, `armv5` | Ubuntu, Debian, Alpine, Raspberry Pi, VPS |
-| **OpenWrt** | `mipsle` (soft/hard float), `mips` | MediaTek MT7628, MT7620, MT7621, Atheros AR9331 |
-| **macOS** | `arm64`, `amd64` | Apple Silicon (M1/M2/M3/M4), Intel Macs |
-| **Windows** | `amd64`, `arm64` | Windows 10/11, Windows Server |
-
----
-
 ## 🛠️ Usage with AI Clients
 
-Set the Base URL in your AI coding tool or client application:
+Set the Unified Base URL in your AI tool or client application:
 
-* **OpenAI Base URL:** `http://localhost:8787/v1` (or your server's Tailscale/LAN IP)
-* **API Key:** Leave empty, or provide your configured `Proxy Key`
+* **Unified API Base URL:** `http://localhost:8787/v1` (or your server's LAN / Tailscale IP)
+* **API Key:** Leave empty, or enter your configured `Proxy Key`
 
-### Example: Python OpenAI SDK
+### 1. Anthropic SDK / Claude Code
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://localhost:8787",
+    api_key="your-proxy-key" # or any non-empty string if proxy key is not set
+)
+
+response = client.messages.create(
+    model="muse-spark-1.3-contributor-free",
+    max_tokens=100,
+    messages=[{"role": "user", "content": "Hello via Anthropic protocol!"}]
+)
+print(response.content[0].text)
+```
+
+### 2. OpenAI SDK
 ```python
 from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8787/v1",
-    api_key="your-proxy-key" # Optional if proxy key is empty
+    api_key="your-proxy-key"
 )
 
 response = client.chat.completions.create(
-    model="muse-spark-1.3-contributor-free",
-    messages=[{"role": "user", "content": "Hello world!"}],
+    model="nemotron-3.5-lightning-free",
+    messages=[{"role": "user", "content": "Hello via OpenAI protocol!"}],
     stream=True
 )
 
 for chunk in response:
-    content = chunk.choices[0].delta.content or ""
-    print(content, end="", flush=True)
+    print(chunk.choices[0].delta.content or "", end="", flush=True)
 ```
 
-### Example: cURL
+### 3. cURL (Anthropic Endpoint)
 ```bash
-curl http://localhost:8787/v1/chat/completions \
+curl http://localhost:8787/v1/messages \
   -H "Content-Type: application/json" \
+  -H "x-api-key: your-proxy-key" \
+  -H "anthropic-version: 2023-06-01" \
   -d '{
-    "model": "muse-spark-1.3-contributor-free",
-    "messages": [{"role": "user", "content": "Ping!"}]
+    "model": "space-bunny-free",
+    "max_tokens": 100,
+    "messages": [{"role": "user", "content": "Hi!"}]
   }'
 ```
 
@@ -211,7 +185,7 @@ curl http://localhost:8787/v1/chat/completions \
 
 ## ⚙️ Configuration
 
-The router auto-generates `opencode-router.json` on first run if not present. All settings can also be modified directly from the WebUI:
+The router auto-generates `opencode-router.json` on first run if not present. All settings can be adjusted on the fly from the WebUI:
 
 ```json
 {
@@ -229,16 +203,17 @@ The router auto-generates `opencode-router.json` on first run if not present. Al
   "modelAliases": {},
   "autoSyncModels": true,
   "autoSyncIntervalMs": 900000,
-  "autoUA": true
+  "autoUA": true,
+  "outboundProxy": "socks5://127.0.0.1:1080"
 }
 ```
 
-### Configuration Options:
+### Key Configuration Options:
 * `host` *(string)*: Listening interface (`0.0.0.0` for all interfaces).
 * `port` *(int)*: Listening port (default `8787`).
-* `proxyKey` *(string)*: Optional authentication key for your gateway. Keep empty for open access.
-* `upstream` *(string)*: Upstream endpoint target.
-* `autoUA` *(bool)*: Automatically track upstream releases and sync client User-Agent envelopes.
+* `proxyKey` *(string)*: Optional authentication key for your gateway.
+* `outboundProxy` *(string)*: HTTP or SOCKS5 proxy URL (`http://`, `https://`, `socks5://`, `socks5h://`) with optional user/password.
+* `autoUA` *(bool)*: Automatically tracks official upstream releases and updates User-Agent headers.
 * `fallbackModels` *(array)*: Priority order for automatic failover when a model encounters a 429 rate limit or outage.
 
 ---

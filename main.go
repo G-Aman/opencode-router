@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,10 +15,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"net/url"
 )
 
 func modelFormat(id string) string {
@@ -39,6 +42,26 @@ func modelFormat(id string) string {
 	return "chat"
 }
 
+func resolveModelName(rawModel string) string {
+	parts := strings.Split(rawModel, "/")
+	model := parts[len(parts)-1]
+	if model == "" {
+		model = "nemotron-3-ultra-free"
+	}
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
+	seenAliases := make(map[string]bool)
+	for hops := 0; hops < 5; hops++ {
+		if alias, ok := cfg.ModelAliases[model]; ok && alias != "" && !seenAliases[alias] {
+			seenAliases[model] = true
+			model = alias
+		} else {
+			break
+		}
+	}
+	return model
+}
+
 
 
 
@@ -58,6 +81,7 @@ type Config struct {
 	RateLimitWindowMs int               `json:"rateLimitWindowMs"`
 	ProxyKey          string            `json:"proxyKey"`
 	DefaultUpstreamKey string            `json:"defaultUpstreamKey"`
+	OutboundProxy     string            `json:"outboundProxy"`
 	TrustForwarded    bool              `json:"trustForwarded"`
 	TimeoutMs         int               `json:"timeoutMs"`
 	CacheMs           int               `json:"cacheMs"`
@@ -95,6 +119,25 @@ var (
 	logLines []map[string]string
 )
 
+// getUpstreamClient returns an http.Client configured with timeouts and optional outbound proxy
+func getUpstreamClient(timeout time.Duration) *http.Client {
+	cfgMu.RLock()
+	proxyStr := strings.TrimSpace(cfg.OutboundProxy)
+	cfgMu.RUnlock()
+
+	client := &http.Client{Timeout: timeout}
+	if proxyStr != "" {
+		if proxyURL, err := url.Parse(proxyStr); err == nil {
+			client.Transport = &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+			}
+		} else {
+			log.Printf("proxy: invalid outbound proxy URL %q: %v", proxyStr, err)
+		}
+	}
+	return client
+}
+
 func addLog(msg string) {
 	logMu.Lock()
 	defer logMu.Unlock()
@@ -121,6 +164,11 @@ func recordReq(status int, model string, ms int64) {
 	window60 = append(window60, now)
 	min := now.Unix() / 60
 	perMinute[min]++
+	for m := range perMinute {
+		if min-m > 10 {
+			delete(perMinute, m)
+		}
+	}
 
 	entry := map[string]interface{}{
 		"model":  model,
@@ -374,12 +422,16 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 	if proxyKey != "" {
 		inAuth := r.Header.Get("Authorization")
 		token := strings.TrimSpace(strings.TrimPrefix(inAuth, "Bearer "))
+		apiKey := strings.TrimSpace(r.Header.Get("x-api-key"))
+		if token == "" && apiKey != "" {
+			token = apiKey
+		}
 		upstreamHeader := strings.TrimSpace(r.Header.Get("x-zen-key"))
 
 		isByok := strings.HasPrefix(token, "zen_") || strings.HasPrefix(token, "oc_") ||
 			strings.HasPrefix(upstreamHeader, "zen_") || strings.HasPrefix(upstreamHeader, "oc_")
 
-		if token != proxyKey && !isByok {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(proxyKey)) != 1 && !isByok {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.WriteHeader(http.StatusUnauthorized)
@@ -417,7 +469,11 @@ func adminAuth(w http.ResponseWriter, r *http.Request) bool {
 	}
 	inAuth := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(inAuth, "Bearer ")
-	if token != proxyKey {
+	apiKey := r.Header.Get("x-api-key")
+	if token == "" && apiKey != "" {
+		token = apiKey
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(proxyKey)) != 1 {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -579,12 +635,10 @@ func handleApiConfig(w http.ResponseWriter, r *http.Request) {
 
 		cfgMu.Lock()
 		// Preserve sensitive/internal fields if omitted or masked
-		if newCfg.DefaultUpstreamKey == "" && cfg.DefaultUpstreamKey != "" {
-			var checkMap map[string]interface{}
-			if err := json.Unmarshal(bodyBytes, &checkMap); err == nil {
-				if _, ok := checkMap["defaultUpstreamKey"]; !ok {
-					newCfg.DefaultUpstreamKey = cfg.DefaultUpstreamKey
-				}
+		var checkMap map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &checkMap); err == nil {
+			if _, ok := checkMap["defaultUpstreamKey"]; !ok {
+				newCfg.DefaultUpstreamKey = cfg.DefaultUpstreamKey
 			}
 		}
 		if newCfg.ProxyKey == "••••••••" {
@@ -680,6 +734,7 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 		testAuth = "Bearer " + cfg.DefaultUpstreamKey
 	}
 	testUA := cfg.UA
+	upstreamBase := cfg.Upstream
 	cfgMu.RUnlock()
 
 	headers := http.Header{
@@ -694,7 +749,7 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isResponses := modelFormat(model) == "responses"
-	targetURL := strings.TrimRight(cfg.Upstream, "/") + "/chat/completions"
+	targetURL := strings.TrimRight(upstreamBase, "/") + "/chat/completions"
 	format := "chat"
 	var payload map[string]interface{}
 
@@ -704,7 +759,7 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 			"messages": []map[string]string{{"role": "user", "content": "ping"}},
 		}
 	} else if isResponses {
-		targetURL = strings.TrimRight(cfg.Upstream, "/") + "/responses"
+		targetURL = strings.TrimRight(upstreamBase, "/") + "/responses"
 		format = "responses"
 		payload = map[string]interface{}{
 			"model":              model,
@@ -725,10 +780,23 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bodyBytes, _ := json.Marshal(payload)
-	upReq, _ := http.NewRequest("POST", targetURL, bytes.NewReader(bodyBytes))
+	upReq, reqErr := http.NewRequest("POST", targetURL, bytes.NewReader(bodyBytes))
+	if reqErr != nil {
+		recordObserved(model, false)
+		addLog(fmt.Sprintf("test %s request error: %v", model, reqErr))
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":     false,
+			"model":  model,
+			"format": format,
+			"status": 400,
+			"ms":     0,
+			"detail": reqErr.Error(),
+		})
+		return
+	}
 	upReq.Header = headers
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := getUpstreamClient(15 * time.Second)
 	upResp, err := client.Do(upReq)
 	duration := time.Since(start).Milliseconds()
 
@@ -755,6 +823,7 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recordObserved(model, ok)
+	go savePersistedSync()
 	addLog(fmt.Sprintf("tested model %s: status=%d ms=%d", model, upResp.StatusCode, duration))
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":     ok,
@@ -798,6 +867,9 @@ func handleApiSync(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleApiReset(w http.ResponseWriter, r *http.Request) {
+	if !adminAuth(w, r) {
+		return
+	}
 	statsMu.Lock()
 	totalReqs = 0
 	totalErrors = 0
@@ -805,6 +877,11 @@ func handleApiReset(w http.ResponseWriter, r *http.Request) {
 	window60 = nil
 	perMinute = make(map[int64]int64)
 	statsMu.Unlock()
+
+	observedMu.Lock()
+	observed = make(map[string]map[string]int64)
+	observedMu.Unlock()
+	go savePersistedSync()
 
 	addLog("stats reset via UI")
 	w.Header().Set("Content-Type", "application/json")
@@ -836,6 +913,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	var reqBody map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 		recordReq(400, "unknown", time.Since(start).Milliseconds())
@@ -844,27 +922,16 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rawModel, _ := reqBody["model"].(string)
-	parts := strings.Split(rawModel, "/")
-	model := parts[len(parts)-1]
-	if model == "" {
-		model = "nemotron-3-ultra-free"
-	}
-	cfgMu.RLock()
-	seenAliases := make(map[string]bool)
-	for hops := 0; hops < 5; hops++ {
-		if alias, ok := cfg.ModelAliases[model]; ok && alias != "" && !seenAliases[alias] {
-			seenAliases[model] = true
-			model = alias
-		} else {
-			break
-		}
-	}
-	cfgMu.RUnlock()
+	model := resolveModelName(rawModel)
 	isStream, _ := reqBody["stream"].(bool)
 
 	// Auth token & BYOK resolution
 	inAuth := r.Header.Get("Authorization")
 	token := strings.TrimSpace(strings.TrimPrefix(inAuth, "Bearer "))
+	apiKey := strings.TrimSpace(r.Header.Get("x-api-key"))
+	if token == "" && apiKey != "" {
+		token = apiKey
+	}
 	upstreamHeader := strings.TrimSpace(r.Header.Get("x-zen-key"))
 
 	cfgMu.RLock()
@@ -876,7 +943,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		strings.HasPrefix(upstreamHeader, "zen_") || strings.HasPrefix(upstreamHeader, "oc_")
 
 	if proxyKey != "" {
-		if token != proxyKey && !isByok {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(proxyKey)) != 1 && !isByok {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"invalid proxy key"}}`))
@@ -904,6 +971,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	if timeoutSec <= 0 {
 		timeoutSec = 120
 	}
+	upstreamBase := cfg.Upstream
 	cfgMu.RUnlock()
 
 	headers := http.Header{
@@ -918,9 +986,9 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isResponses := modelFormat(model) == "responses"
-	targetURL := strings.TrimRight(cfg.Upstream, "/") + "/chat/completions"
+	targetURL := strings.TrimRight(upstreamBase, "/") + "/chat/completions"
 	if isResponses {
-		targetURL = strings.TrimRight(cfg.Upstream, "/") + "/responses"
+		targetURL = strings.TrimRight(upstreamBase, "/") + "/responses"
 	}
 
 	var upstreamPayload map[string]interface{}
@@ -1102,7 +1170,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	upReq.Header = headers
 
-	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+	client := getUpstreamClient(time.Duration(timeoutSec) * time.Second)
 	upResp, err := client.Do(upReq)
 	if err != nil {
 		recordReq(502, model, time.Since(start).Milliseconds())
@@ -1371,10 +1439,13 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 
 	if len(toolCallsMap) > 0 {
 		var toolCallsList []map[string]interface{}
-		for i := 0; i < len(toolCallsMap); i++ {
-			if tc, ok := toolCallsMap[i]; ok {
-				toolCallsList = append(toolCallsList, tc)
-			}
+		var keys []int
+		for k := range toolCallsMap {
+			keys = append(keys, k)
+		}
+		sort.Ints(keys)
+		for _, k := range keys {
+			toolCallsList = append(toolCallsList, toolCallsMap[k])
 		}
 		msgObj["tool_calls"] = toolCallsList
 		finishReason = "tool_calls"
@@ -1437,16 +1508,11 @@ func main() {
 	mux.HandleFunc("/models", handleModels)
 	mux.HandleFunc("/v1/chat/completions", handleChat)
 	mux.HandleFunc("/chat/completions", handleChat)
+	mux.HandleFunc("/v1/messages", handleAnthropicMessages)
+	mux.HandleFunc("/messages", handleAnthropicMessages)
 
-	// Static assets handler
-	mux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
-		relPath := strings.TrimPrefix(r.URL.Path, "/assets/")
-		fullPath := filepath.Join(assetsDir, relPath)
-		if strings.HasSuffix(relPath, ".png") {
-			w.Header().Set("Content-Type", "image/png")
-		}
-		http.ServeFile(w, r, fullPath)
-	})
+	// Static assets handler (natively sanitized against traversal)
+	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir))))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" || r.URL.Path == "/ui" {
@@ -1526,6 +1592,9 @@ func rateLimitFor(r *http.Request) (bool, int) {
 		validIdx++
 	}
 	hits = hits[validIdx:]
+	if len(hits) == 0 {
+		delete(rateBuckets, ip)
+	}
 
 	if len(hits) >= max {
 		retryAfter := int((hits[0] + int64(window) - now) / 1000)

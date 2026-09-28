@@ -294,6 +294,22 @@ label::before { content:"▸ "; color:var(--coral) }
   flex:0 0 auto; font-size:11px; padding:5px 12px; border-radius:6px;
   white-space:nowrap; cursor:pointer; line-height:1.2;
 }
+
+/* ---------- settings sections ---------- */
+.cfg-section {
+  background:#ffffff; border:1px solid #e2e8f0; border-radius:14px;
+  padding:18px 20px; margin-bottom:18px; box-shadow:0 1px 3px rgba(15,23,42,0.03);
+}
+.cfg-section-title {
+  display:flex; align-items:center; justify-content:space-between;
+  font-family:var(--mono); font-size:11px; font-weight:800; text-transform:uppercase;
+  letter-spacing:.08em; color:var(--ink); margin-bottom:12px; padding-bottom:8px;
+  border-bottom:1px dashed #cbd5e1;
+}
+.cfg-section-title span.tag {
+  font-size:9.5px; padding:2px 7px; border-radius:4px;
+  background:#f1f5f9; color:#64748b; border:1px solid #e2e8f0;
+}
 .formgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:0 24px }
 textarea { resize:vertical; min-height:96px; font-family:var(--mono); font-size:12.5px }
 .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap }
@@ -400,9 +416,9 @@ textarea { resize:vertical; min-height:96px; font-family:var(--mono); font-size:
 
 <main>
   <section class="tab active" id="tab-overview">
-    <!-- Dynamic OpenAPI Endpoint Banner -->
+    <!-- Dynamic Endpoint Banner -->
     <div class="endpoint-card">
-      <span class="endpoint-tag">OPENAI BASE URL</span>
+      <span class="endpoint-tag">API BASE URL</span>
       <span class="endpoint-val" id="endpointUrl" title="Click to copy">http://127.0.0.1:8790/v1</span>
       <button type="button" class="primary endpoint-copy-btn" id="copyBtn" onclick="copyEndpoint()">Copy URL</button>
     </div>
@@ -415,7 +431,7 @@ textarea { resize:vertical; min-height:96px; font-family:var(--mono); font-size:
     </div>
 
     <div class="panel">
-      <h2><span class="hh">Recent requests</span><span class="sticker grape" style="transform:none">live feed</span></h2>
+      <h2><span class="hh">Recent requests</span><span style="display:inline-flex; align-items:center; gap:10px; margin-left:auto"><button style="font-size:10.5px; padding:4px 10px;" onclick="resetStats()">Clear stats</button><span class="sticker grape" style="transform:none">live feed</span></span></h2>
       <table id="reqTable">
         <thead><tr><th>Time</th><th>Model</th><th>Result</th><th>Latency</th><th>Count</th></tr></thead>
         <tbody><tr><td colspan="5" class="empty">no requests yet — go make some noise.</td></tr></tbody>
@@ -455,61 +471,118 @@ textarea { resize:vertical; min-height:96px; font-family:var(--mono); font-size:
   <section class="tab" id="tab-config">
     <div class="panel">
       <h2><span class="hh">Server settings</span><span class="sticker coral" style="transform:none">port / host need restart</span></h2>
-      <div class="formgrid">
-        <div>
-          <label>Host</label><input id="cfgHost" type="text">
-          <label>Port</label><input id="cfgPort" type="number">
-          <label>Upstream url</label><input id="cfgUpstream" type="text">
-          <label>User-agent (the unlock)</label><input id="cfgUa" type="text">
+      
+      <!-- Section 1: Network & Server -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">
+          <span>Network &amp; Connectivity</span>
+          <span class="tag">Core</span>
         </div>
-        <div>
-          <label>Default model <span class="hint">(empty = auto-pick healthy free model)</span></label><input id="cfgDefault" type="text">
-          <label>Proxy key (empty = open)</label><input id="cfgProxyKey" type="password" autocomplete="new-password">
-          <label>Upstream Key (BYOK, optional)</label><input id="cfgUpstreamKey" type="password" autocomplete="new-password">
-          <div class="row" style="gap:8px;margin-top:2px">
-            <button type="button" class="primary" onclick="testUpstreamKey()" style="font-size:11px;padding:6px 10px">Test key</button>
-            <span class="hint mono" id="cfgAuth"></span>
-            <span class="hint" id="upstreamKeyHint" style="min-height:16px"></span>
+        <div class="formgrid">
+          <div>
+            <label>Host</label><input id="cfgHost" type="text">
+            <label>Port</label><input id="cfgPort" type="number">
+            <label>Upstream URL</label><input id="cfgUpstream" type="text">
           </div>
-          <label>Timeout (ms)</label><input id="cfgTimeout" type="number">
+          <div>
+            <label>Outbound proxy <span class="hint">(socks5://[user:pass@]host:port or http://)</span></label><input id="cfgOutboundProxy" type="text" placeholder="e.g. socks5://127.0.0.1:1080">
+            <label>User-agent (the unlock)</label><input id="cfgUa" type="text">
+            <div class="checkbox"><input type="checkbox" id="cfgTrust"><span>Trust <code>x-forwarded-for</code> from a reverse proxy</span></div>
+          </div>
         </div>
       </div>
-      <label>Fallback models (json array — tried in order on 429/5xx)</label>
-      <textarea id="cfgFallback"></textarea>
-      <label>Model aliases (json map — e.g. {"gpt-4o":"space-bunny-free"})</label>
-      <textarea id="cfgAliases"></textarea>
-      <div class="checkbox"><input type="checkbox" id="cfgTrust"><span>Trust <code>x-forwarded-for</code> from a reverse proxy</span></div>
-      <div class="checkbox"><input type="checkbox" id="cfgAutoSync"><span>Auto-sync models (probe upstream free models, prune dead ones)</span></div>
-      <label>Auto-sync interval (ms)</label><input id="cfgSyncMs" type="number">
-      <label>Models metadata endpoint URL</label>
-      <input id="cfgMetaEndpoint" type="text" placeholder="https://models.dev/api.json">
-      <div class="row" style="gap:10px;margin-top:4px">
-        <div style="flex:1">
-          <label>Metadata request timeout (seconds)</label>
-          <input id="cfgMetaTimeout" type="number" min="5" max="120" placeholder="30">
+
+      <!-- Section 2: Security & Access -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">
+          <span>Security &amp; Rate Limiting</span>
+          <span class="tag">Access</span>
         </div>
-        <div style="flex:1">
-          <label>Metadata sync interval (hours)</label>
-          <input id="cfgMetaSyncHours" type="number" min="1" max="168" placeholder="24">
+        <div class="formgrid">
+          <div>
+            <label>Proxy key (empty = open)</label><input id="cfgProxyKey" type="password" autocomplete="new-password">
+            <div class="checkbox"><input type="checkbox" id="cfgInject"><span>Inject <code>x-opencode-session</code> header per client (free tier needs it)</span></div>
+          </div>
+          <div>
+            <label>Upstream Key (BYOK, optional)</label><input id="cfgUpstreamKey" type="password" autocomplete="new-password">
+            <div class="row" style="gap:8px;margin-top:2px">
+              <button type="button" class="primary" onclick="testUpstreamKey()" style="font-size:11px;padding:6px 10px">Test key</button>
+              <span class="hint mono" id="cfgAuth"></span>
+              <span class="hint" id="upstreamKeyHint" style="min-height:16px"></span>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:14px;border-top:1px dashed #e2e8f0;padding-top:10px">
+          <div class="checkbox"><input type="checkbox" id="cfgRateLimit"><span>Rate-limit chat requests per client (0 = off)</span></div>
+          <div class="row" style="gap:10px;margin-top:6px">
+            <div><label>Requests / window</label><input id="cfgRateMax" type="number" min="0" style="width:120px"></div>
+            <div><label>Window (ms)</label><input id="cfgRateWindow" type="number" min="1000" style="width:140px"></div>
+          </div>
         </div>
       </div>
-      <div class="hint" style="margin-top:-2px;margin-bottom:12px">Pulls model specs, context limits, and modalities. Saved to <code>models-dev-cache.json</code>. Trigger manually anytime via <b>Sync now</b> on the Models page.</div>
-      <label>Health-probe credentials</label>
-      <select id="cfgProbeAuth" style="width:100%">
-        <option value="auto">Auto — use Upstream Key if set, else anonymous</option>
-        <option value="anonymous">Always anonymous (public free tier)</option>
-        <option value="key">Always Upstream Key (tests own quota)</option>
-      </select>
-      <div class="checkbox"><input type="checkbox" id="cfgAutoUA"><span>Auto-track opencode releases &amp; update the User-Agent</span></div>
-      <label>User-agent refresh interval (days)</label><input id="cfgUaDays" type="number" step="0.5" min="0.1">
-      <div class="checkbox"><input type="checkbox" id="cfgInject"><span>Inject <code>x-opencode-session</code> header per client (free tier needs it)</span></div>
-      <div class="checkbox"><input type="checkbox" id="cfgRateLimit"><span>Rate-limit chat requests per client (0 = off)</span></div>
-      <div class="row" style="gap:10px;margin-top:6px">
-        <div><label>Requests / window</label><input id="cfgRateMax" type="number" min="0" style="width:120px"></div>
-        <div><label>Window (ms)</label><input id="cfgRateWindow" type="number" min="1000" style="width:140px"></div>
+
+      <!-- Section 3: Model Routing & Formats -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">
+          <span>Model Routing &amp; Rules</span>
+          <span class="tag">Routing</span>
+        </div>
+        <div class="formgrid">
+          <div>
+            <label>Default model <span class="hint">(empty = auto-pick healthy free model)</span></label><input id="cfgDefault" type="text">
+          </div>
+          <div>
+            <label>Timeout (ms)</label><input id="cfgTimeout" type="number">
+          </div>
+        </div>
+        <label>Responses-API models (json array — patterns may end in *)</label>
+        <textarea id="cfgResponses" style="min-height:70px"></textarea>
+        <label>Model aliases (json map — e.g. {"gpt-4o":"space-bunny-free"})</label>
+        <textarea id="cfgAliases" style="min-height:70px"></textarea>
+        <label>Fallback models (json array — tried in order on 429/5xx)</label>
+        <textarea id="cfgFallback" style="min-height:70px"></textarea>
       </div>
-      <label>Responses-API models (json array — patterns may end in *)</label>
-      <textarea id="cfgResponses"></textarea>
+
+      <!-- Section 4: Health Probes, Metadata & Sync -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">
+          <span>Health Probes &amp; Auto-Sync</span>
+          <span class="tag">Automation</span>
+        </div>
+        <label>Health-probe credentials</label>
+        <select id="cfgProbeAuth" style="width:100%">
+          <option value="auto">Auto — use Upstream Key if set, else anonymous</option>
+          <option value="anonymous">Always anonymous (public free tier)</option>
+          <option value="key">Always Upstream Key (tests own quota)</option>
+        </select>
+        <div class="formgrid" style="margin-top:10px">
+          <div>
+            <div class="checkbox"><input type="checkbox" id="cfgAutoSync"><span>Auto-sync models (probe upstream free models, prune dead ones)</span></div>
+            <label>Auto-sync interval (ms)</label><input id="cfgSyncMs" type="number">
+          </div>
+          <div>
+            <div class="checkbox"><input type="checkbox" id="cfgAutoUA"><span>Auto-track opencode releases &amp; update User-Agent</span></div>
+            <label>User-agent refresh interval (days)</label><input id="cfgUaDays" type="number" step="0.5" min="0.1">
+          </div>
+        </div>
+        <div style="margin-top:14px;border-top:1px dashed #e2e8f0;padding-top:10px">
+          <label>Models metadata endpoint URL</label>
+          <input id="cfgMetaEndpoint" type="text" placeholder="https://models.dev/api.json">
+          <div class="row" style="gap:10px;margin-top:4px">
+            <div style="flex:1">
+              <label>Metadata request timeout (seconds)</label>
+              <input id="cfgMetaTimeout" type="number" min="5" max="120" placeholder="30">
+            </div>
+            <div style="flex:1">
+              <label>Metadata sync interval (hours)</label>
+              <input id="cfgMetaSyncHours" type="number" min="1" max="168" placeholder="24">
+            </div>
+          </div>
+          <div class="hint" style="margin-top:-2px;margin-bottom:6px">Pulls model specs, context limits, and modalities to <code>models-dev-cache.json</code>.</div>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
       <div class="row" style="margin-top:22px">
         <button class="primary" onclick="saveConfig()">Save &amp; apply</button>
         <button onclick="reloadConfig()">Discard / reload</button>
@@ -720,13 +793,19 @@ function renderModels(st) {
             return `<div><span style="color:${okColor};font-weight:700;font-size:11px">${mt.ok ? "✓" : "✗"} ${mt.status} · ${fmtDur(mt.ms)}</span>${detailHtml}</div>`
           }
           const targetKey = aliasTarget || m
+          const isWorkingInSync = st && st.sync && Array.isArray(st.sync.working) && (st.sync.working.includes(targetKey) || st.sync.working.includes(m))
           const obs = (st && st.sync && st.sync.observed && (st.sync.observed[targetKey] || st.sync.observed[m]))
           if (obs && (obs.ok > 0 || obs.fail > 0)) {
-            const ok = obs.ok >= obs.fail
-            return `<span class="badge ${ok ? "ok" : "bad"}" style="font-size:10px">${ok ? "✓ " + obs.ok + " ok" : "✗ " + obs.fail + " fail"}</span>`
+            const ok = obs.ok > 0 || (isWorkingInSync && obs.fail === 0)
+            if (obs.ok > 0) {
+              return `<span class="badge ${obs.ok >= obs.fail ? "ok" : "bad"}" style="font-size:10px">${obs.ok >= obs.fail ? "✓ " + obs.ok + " ok" : "✗ " + obs.fail + " fail"}</span>`
+            }
           }
-          if (st && st.sync && Array.isArray(st.sync.working) && (st.sync.working.includes(targetKey) || st.sync.working.includes(m))) {
+          if (isWorkingInSync) {
             return `<span class="badge ok" style="font-size:10px">✓ ready</span>`
+          }
+          if (obs && obs.fail > 0) {
+            return `<span class="badge bad" style="font-size:10px">✗ ${obs.fail} fail</span>`
           }
           if (st && st.sync && Array.isArray(st.sync.flaky) && (st.sync.flaky.includes(targetKey) || st.sync.flaky.includes(m))) {
             return `<span class="badge warn" style="font-size:10px">~ flaky</span>`
@@ -825,14 +904,14 @@ function renderSync(s) {
   el.setAttribute("data-tip-title", "auto-sync")
   el.setAttribute("tabindex", "0")
   if (s.running) { el.textContent = "auto-sync: probing…"; el.className = "badge warn"; el.setAttribute("data-tip", TIP.syncing); return }
-  if (!s.at) { el.textContent = "auto-sync: never"; el.className = "badge mut"; el.setAttribute("data-tip", TIP.syncnever); return }
+  if (!s.at) { el.textContent = "sync: never"; el.className = "badge mut"; el.setAttribute("data-tip", TIP.syncnever); return }
   const ago = fmtUp(Math.max(1, Math.floor((Date.now() - s.at) / 1000))) + " ago"
   const workingLen = (s.working || []).length
   const rateLen = (s.rateLimited || []).length
   const gatedLen = (s.gated || []).length
   const flakyLen = (s.flaky || []).length
   const deadLen = (s.dead || []).length
-  el.textContent = `auto-sync: ${ago} · ${workingLen} ok · ${rateLen} rate-limited · ${gatedLen} agent-only · ${flakyLen} flaky · ${deadLen} dead`
+  el.textContent = `sync: ${ago} · ${workingLen} ok · ${rateLen} rate-limited · ${gatedLen} agent-only · ${flakyLen} flaky · ${deadLen} dead`
   el.className = "badge " + (s.ok ? (deadLen ? "warn" : "ok") : "bad")
   let tipDetails = TIP.syncdone
   if (deadLen) tipDetails += "\n\nDead: " + s.dead.join(", ")
@@ -942,6 +1021,7 @@ async function populateConfigForm() {
   $("cfgHost").value = config.host
   $("cfgPort").value = config.port
   $("cfgUpstream").value = config.upstream
+  $("cfgOutboundProxy").value = config.outboundProxy || ""
   $("cfgUa").value = config.ua
   $("cfgDefault").value = config.defaultModel
   $("cfgDefault").placeholder = "(auto)"
@@ -983,6 +1063,7 @@ async function saveConfig() {
     host: $("cfgHost").value.trim() || "127.0.0.1",
     port: Number($("cfgPort").value || 8787),
     upstream: $("cfgUpstream").value.trim(),
+    outboundProxy: $("cfgOutboundProxy").value.trim(),
     ua: $("cfgUa").value.trim(),
     defaultModel: $("cfgDefault").value.trim(),
     proxyKey: $("cfgProxyKey").value,
@@ -1007,7 +1088,10 @@ async function saveConfig() {
   if ($("cfgUpstreamKey").value !== savedUpstreamKeyMasked) body.defaultUpstreamKey = $("cfgUpstreamKey").value
   try {
     const r = await api("/api/config", { method: "PUT", body: JSON.stringify(body) })
-    if (r && r.config) config = r.config
+    if (r && r.config) {
+      config = r.config
+      savedUpstreamKeyMasked = config.defaultUpstreamKey || ""
+    }
     toast("Saved & applied", "ok")
     await refreshModels()
     await refreshStatus()
@@ -1025,6 +1109,20 @@ async function restoreModels() {
 }
 
 async function reloadConfig() { config = null; await populateConfigForm(); toast("Reloaded from file") }
+
+function resetStats() {
+  if (!confirm("Are you sure you want to clear request history and stats?")) return
+  try {
+    api("/api/reset", { method: "POST" }).then(() => {
+      manualTests = {}
+      toast("Stats cleared", "ok")
+      refreshStatus()
+      refreshModels()
+    })
+  } catch (e) {
+    toast("Failed to reset stats", "bad")
+  }
+}
 
 async function loadLogs() {
   if (!document.getElementById("tab-logs").classList.contains("active")) return

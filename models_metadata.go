@@ -89,7 +89,7 @@ func syncModelsDevMetadata(force bool) {
 		return
 	}
 
-	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+	client := getUpstreamClient(time.Duration(timeoutSec) * time.Second)
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return
