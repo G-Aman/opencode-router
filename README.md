@@ -218,6 +218,36 @@ The router auto-generates `opencode-router.json` on first run if not present. Al
 
 ---
 
+## 📝 Changelog
+
+### [v1.1.0] - Latest
+- **Native Anthropic `/v1/messages` & `/messages` Compatibility:**
+  - Full support for multi-turn conversations, SSE streaming, function/tool calling (`tool_use` & `tool_result`), and base64 multimodal vision.
+  - Seamless drop-in compatibility for Claude Code, Cline, Cursor, LibreChat, and official Anthropic SDKs.
+- **Outbound HTTP & SOCKS5 Proxy Support:**
+  - Route upstream requests through HTTP, HTTPS, SOCKS5, or SOCKS5h proxies with authentication.
+  - Configurable directly from the WebUI Settings dashboard (`outboundProxy`).
+- **OpenCode CLI Mimicry & Gating Bypass:**
+  - Automatically injects authentic developer system preambles and baseline tools to emulate the official OpenCode CLI client, eliminating upstream `FreeTierError` blocks on gated models (`mimo-*`, `nemotron-*`).
+- **Responses Protocol Bridge:**
+  - Transparently bridges upstream `/responses` SSE streams (e.g. `muse-spark`) for Anthropic clients.
+- **Redesigned WebUI Settings & Stats Reset:**
+  - Settings page structured into 4 responsive cards (*Network & Connectivity*, *Security & Rate Limiting*, *Model Routing & Rules*, *Health Probes & Auto-Sync*).
+  - Added "Clear stats" button to reset request counters and recent metrics (`POST /api/reset`).
+- **Security & Resilience Hardening:**
+  - Constant-time secret comparison (`crypto/subtle.ConstantTimeCompare`) on all authentication tokens.
+  - 32 MB request body limit via `http.MaxBytesReader` to prevent memory exhaustion DoS.
+  - Zero disk I/O during active streaming and chat traffic (pure in-memory mutex tracking with selective persistence on manual tests and sync cycles).
+
+### [v1.0.0]
+- Initial release of OpenCode Router.
+- Full OpenAI `/v1/chat/completions` and `/v1/models` compatibility.
+- Real-time WebUI dashboard with live traffic feed, latency tracking, and model catalog.
+- Automatic upstream model discovery, health probing, and dynamic failover routing.
+- Multi-arch Docker images and pre-compiled static binaries for Linux, OpenWrt (MIPS/MIPSLE), macOS, and Windows.
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
