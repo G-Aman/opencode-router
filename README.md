@@ -22,7 +22,7 @@
 ## ⚡ Highlights
 
 - **Near-Zero Footprint:** Compiled static Go binary consuming **< 13 MB RAM** and **0.0% idle CPU**. Runs smoothly on single-board computers and OpenWrt routers with as little as 64 MB RAM.
-- **Dual OpenAI & Anthropic Compatibility:** Native support for both standard `/v1/chat/completions` and `/v1/messages` (Claude Code, Cursor, Cline, LibreChat, OpenAI SDK, Anthropic SDK).
+- **Full OpenAI & Anthropic Protocol Suite:** Native support for standard OpenAI `/v1/chat/completions`, OpenAI `/v1/responses` (Responses API for n8n AI agents & next-gen SDKs), and Anthropic `/v1/messages` (Claude Code, Cursor, Cline, LibreChat, OpenAI SDK, Anthropic SDK).
 - **Tool Calling & Vision Support:** Full streaming & non-streaming support for Anthropic `tool_use` / `tool_result`, OpenAI function calling, and base64 multimodal vision inputs.
 - **Outbound HTTP & SOCKS5 Proxy:** Built-in network routing through HTTP, HTTPS, SOCKS5, and SOCKS5h proxies with optional authentication.
 - **Client Runtime Mimic:** Emulates official OpenCode CLI headers, preambles, and tool definitions to ensure 100% upstream model availability (including gated models like `mimo-*` and `nemotron-*`).
@@ -220,7 +220,18 @@ The router auto-generates `opencode-router.json` on first run if not present. Al
 
 ## 📝 Changelog
 
-### [v1.1.0] - Latest
+### [v1.2.0] - Latest
+- **Native OpenAI Responses API (`/v1/responses` & `/responses`):**
+  - Full drop-in support for OpenAI Responses API payloads (string or typed `input` items, `instructions`, tools, streaming SSE, and non-streaming).
+  - Strict compliance with OpenAI Responses SSE streaming specification (includes monotonic `sequence_number`, `item_id`, and `annotations` for seamless n8n AI Agent nodes and Vercel AI SDK compatibility).
+  - Native dual routing: directly streams upstream Responses models (`muse-*`) and seamlessly translates between Responses format and Chat Completions format for standard chat models (`mimo-*`, `space-bunny`, `nemotron-*`, etc.).
+- **Unified Authentication & BYOK Key Forwarding:**
+  - Standardized client auth across all endpoints (`/v1/chat/completions`, `/v1/responses`, `/v1/messages`, `/v1/models`).
+  - Seamless pass-through of custom OpenCode/Zen keys (`zen_*`, `oc_*`) while allowing arbitrary dummy keys when `proxyKey` is unconfigured.
+- **Robust Auto-Config Generation & In-Memory Defaults:**
+  - Safeguarded in-memory defaults on initial run preventing empty protocol schemes on partial config updates.
+
+### [v1.1.0]
 - **Native Anthropic `/v1/messages` & `/messages` Compatibility:**
   - Full support for multi-turn conversations, SSE streaming, function/tool calling (`tool_use` & `tool_result`), and base64 multimodal vision.
   - Seamless drop-in compatibility for Claude Code, Cline, Cursor, LibreChat, and official Anthropic SDKs.

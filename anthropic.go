@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -149,49 +148,18 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auth check: Support x-api-key, Authorization: Bearer, or optional open access
-	authHeader := r.Header.Get("Authorization")
-	apiKeyHeader := r.Header.Get("x-api-key")
-	passedKey := strings.TrimSpace(apiKeyHeader)
-	if passedKey == "" && strings.HasPrefix(authHeader, "Bearer ") {
-		passedKey = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	// Auth check via unified resolver
+	okAuth, upstreamAuth := resolveAuth(r)
+	if !okAuth {
+		sendAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid api key")
+		return
 	}
 
 	cfgMu.RLock()
-	proxyKey := cfg.ProxyKey
-	defaultUpstreamKey := cfg.DefaultUpstreamKey
 	upstreamBase := cfg.Upstream
 	ua := cfg.UA
 	timeoutMs := cfg.TimeoutMs
 	cfgMu.RUnlock()
-
-	var upstreamAuth string
-	if proxyKey != "" {
-		if passedKey == "" {
-			sendAnthropicError(w, http.StatusUnauthorized, "authentication_error", "missing api key")
-			return
-		}
-		if subtle.ConstantTimeCompare([]byte(passedKey), []byte(proxyKey)) == 1 {
-			if defaultUpstreamKey != "" {
-				upstreamAuth = "Bearer " + defaultUpstreamKey
-			} else {
-				upstreamAuth = "Bearer public"
-			}
-		} else if strings.HasPrefix(passedKey, "zen_") || strings.HasPrefix(passedKey, "oc_") {
-			upstreamAuth = "Bearer " + passedKey
-		} else {
-			sendAnthropicError(w, http.StatusUnauthorized, "authentication_error", "invalid api key")
-			return
-		}
-	} else {
-		if passedKey != "" && (strings.HasPrefix(passedKey, "zen_") || strings.HasPrefix(passedKey, "oc_")) {
-			upstreamAuth = "Bearer " + passedKey
-		} else if defaultUpstreamKey != "" {
-			upstreamAuth = "Bearer " + defaultUpstreamKey
-		} else {
-			upstreamAuth = "Bearer public"
-		}
-	}
 
 	model := resolveModelName(req.Model)
 

@@ -209,42 +209,49 @@ func genRequestID() string {
 	return fmt.Sprintf("msg_0%s001%s", tPart, string(randPart))
 }
 
+func defaultConfig() Config {
+	return Config{
+		Host:              "0.0.0.0",
+		Port:              8787,
+		Upstream:          "https://opencode.ai/zen/v1",
+		UA:                "opencode/1.18.34 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14",
+		AutoUA:            true,
+		InjectSession:     true,
+		TimeoutMs:         120000,
+		RateLimitWindowMs: 60000,
+		ProxyKey:          "",
+		MetaEndpoint:      "https://models.dev/api.json",
+		MetaTimeoutSec:    30,
+		MetaSyncHours:     24,
+		DefaultModel:      "nemotron-3.5-lightning-free",
+		FallbackModels: []string{
+			"ling-3.0-flash-fin-free",
+			"nemotron-3-ultra-free",
+			"muse-spark-1.3-contributor-free",
+			"muse-spark-1.2-contributor-free",
+			"mimo-v2.6-flash-free",
+			"longcat-2.5-preview-free",
+			"nemotron-3.5-lightning-free",
+			"mimo-v2.5-free",
+			"space-bunny-free",
+		},
+		ModelAliases:    make(map[string]string),
+		ResponsesModels: []string{"gpt-5*", "gpt-6*", "grok-*", "muse-spark-*"},
+	}
+}
+
 func loadResources(dir string) error {
 	configPath = filepath.Join(dir, "opencode-router.json")
+	cfg = defaultConfig()
 	if b, err := os.ReadFile(configPath); err == nil {
 		json.Unmarshal(b, &cfg)
 	} else {
-		cfg = Config{
-			Host:              "0.0.0.0",
-			Port:              8787,
-			Upstream:          "https://opencode.ai/zen/v1",
-			UA:                "opencode/1.18.32 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14",
-			AutoUA:            true,
-			InjectSession:     true,
-			TimeoutMs:         120000,
-			RateLimitWindowMs: 60000,
-			ProxyKey:          "",
-			MetaEndpoint:      "https://models.dev/api.json",
-			MetaTimeoutSec:    30,
-			MetaSyncHours:     24,
-			DefaultModel:      "nemotron-3.5-lightning-free",
-			FallbackModels: []string{
-				"ling-3.0-flash-fin-free",
-				"nemotron-3-ultra-free",
-				"muse-spark-1.3-contributor-free",
-				"muse-spark-1.2-contributor-free",
-				"mimo-v2.6-flash-free",
-				"longcat-2.5-preview-free",
-				"nemotron-3.5-lightning-free",
-				"mimo-v2.5-free",
-				"space-bunny-free",
-			},
-			ModelAliases:    make(map[string]string),
-			ResponsesModels: []string{"gpt-5*", "gpt-6*", "grok-*", "muse-spark-*"},
-		}
 		if b, err := json.MarshalIndent(cfg, "", "  "); err == nil {
 			os.WriteFile(configPath, b, 0644)
 		}
+	}
+	if cfg.Upstream == "" {
+		cfg.Upstream = "https://opencode.ai/zen/v1"
 	}
 
 	if b, err := os.ReadFile(filepath.Join(dir, "base_tools.json")); err == nil {
@@ -393,6 +400,49 @@ func extractContentText(v interface{}) string {
 	return ""
 }
 
+func resolveAuth(r *http.Request) (bool, string) {
+	inAuth := r.Header.Get("Authorization")
+	token := strings.TrimSpace(strings.TrimPrefix(inAuth, "Bearer "))
+	apiKey := strings.TrimSpace(r.Header.Get("x-api-key"))
+	if token == "" && apiKey != "" {
+		token = apiKey
+	}
+	upstreamHeader := strings.TrimSpace(r.Header.Get("x-zen-key"))
+
+	cfgMu.RLock()
+	proxyKey := cfg.ProxyKey
+	defaultUpstreamKey := cfg.DefaultUpstreamKey
+	cfgMu.RUnlock()
+
+	isByok := strings.HasPrefix(token, "zen_") || strings.HasPrefix(token, "oc_") ||
+		strings.HasPrefix(upstreamHeader, "zen_") || strings.HasPrefix(upstreamHeader, "oc_")
+
+	if proxyKey != "" {
+		if !isByok && subtle.ConstantTimeCompare([]byte(token), []byte(proxyKey)) != 1 {
+			return false, ""
+		}
+	}
+
+	var upstreamAuth string
+	if upstreamHeader != "" && upstreamHeader != "public" {
+		upstreamAuth = "Bearer " + upstreamHeader
+	} else if isByok {
+		if strings.HasPrefix(token, "zen_") || strings.HasPrefix(token, "oc_") {
+			upstreamAuth = "Bearer " + token
+		} else if strings.HasPrefix(upstreamHeader, "zen_") || strings.HasPrefix(upstreamHeader, "oc_") {
+			upstreamAuth = "Bearer " + upstreamHeader
+		} else {
+			upstreamAuth = inAuth
+		}
+	} else if defaultUpstreamKey != "" {
+		upstreamAuth = "Bearer " + defaultUpstreamKey
+	} else {
+		upstreamAuth = "Bearer public"
+	}
+
+	return true, upstreamAuth
+}
+
 func handleModels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -415,30 +465,15 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	cfgMu.RLock()
-	proxyKey := cfg.ProxyKey
-	cfgMu.RUnlock()
 
-	if proxyKey != "" {
-		inAuth := r.Header.Get("Authorization")
-		token := strings.TrimSpace(strings.TrimPrefix(inAuth, "Bearer "))
-		apiKey := strings.TrimSpace(r.Header.Get("x-api-key"))
-		if token == "" && apiKey != "" {
-			token = apiKey
-		}
-		upstreamHeader := strings.TrimSpace(r.Header.Get("x-zen-key"))
-
-		isByok := strings.HasPrefix(token, "zen_") || strings.HasPrefix(token, "oc_") ||
-			strings.HasPrefix(upstreamHeader, "zen_") || strings.HasPrefix(upstreamHeader, "oc_")
-
-		if subtle.ConstantTimeCompare([]byte(token), []byte(proxyKey)) != 1 && !isByok {
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"invalid proxy key"}}`))
-			return
-		}
+	if okAuth, _ := resolveAuth(r); !okAuth {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"invalid proxy key"}}`))
+		return
 	}
+
 	data, ok := fetchModels()
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"object": "list",
@@ -640,9 +675,15 @@ func handleApiConfig(w http.ResponseWriter, r *http.Request) {
 			if _, ok := checkMap["defaultUpstreamKey"]; !ok {
 				newCfg.DefaultUpstreamKey = cfg.DefaultUpstreamKey
 			}
+			if u, ok := checkMap["upstream"].(string); !ok || strings.TrimSpace(u) == "" {
+				newCfg.Upstream = cfg.Upstream
+			}
 		}
 		if newCfg.ProxyKey == "••••••••" {
 			newCfg.ProxyKey = cfg.ProxyKey
+		}
+		if newCfg.Upstream == "" {
+			newCfg.Upstream = "https://opencode.ai/zen/v1"
 		}
 
 		cfg = newCfg
@@ -926,40 +967,13 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	isStream, _ := reqBody["stream"].(bool)
 
 	// Auth token & BYOK resolution
-	inAuth := r.Header.Get("Authorization")
-	token := strings.TrimSpace(strings.TrimPrefix(inAuth, "Bearer "))
-	apiKey := strings.TrimSpace(r.Header.Get("x-api-key"))
-	if token == "" && apiKey != "" {
-		token = apiKey
-	}
-	upstreamHeader := strings.TrimSpace(r.Header.Get("x-zen-key"))
-
-	cfgMu.RLock()
-	proxyKey := cfg.ProxyKey
-	defaultUpstreamKey := cfg.DefaultUpstreamKey
-	cfgMu.RUnlock()
-
-	isByok := strings.HasPrefix(token, "zen_") || strings.HasPrefix(token, "oc_") ||
-		strings.HasPrefix(upstreamHeader, "zen_") || strings.HasPrefix(upstreamHeader, "oc_")
-
-	if proxyKey != "" {
-		if subtle.ConstantTimeCompare([]byte(token), []byte(proxyKey)) != 1 && !isByok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"invalid proxy key"}}`))
-			return
-		}
-	}
-
-	auth := "Bearer public"
-	if upstreamHeader != "" && upstreamHeader != "public" {
-		auth = "Bearer " + upstreamHeader
-	} else if isByok {
-		auth = inAuth
-	} else if defaultUpstreamKey != "" {
-		auth = "Bearer " + defaultUpstreamKey
-	} else if token != "" && token != "public" && proxyKey == "" {
-		auth = inAuth
+	okAuth, auth := resolveAuth(r)
+	if !okAuth {
+		recordReq(401, model, time.Since(start).Milliseconds())
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"type":"invalid_request_error","message":"invalid proxy key"}}`))
+		return
 	}
 
 	sessionID := genSessionID()
@@ -1510,6 +1524,14 @@ func main() {
 	mux.HandleFunc("/chat/completions", handleChat)
 	mux.HandleFunc("/v1/messages", handleAnthropicMessages)
 	mux.HandleFunc("/messages", handleAnthropicMessages)
+	mux.HandleFunc("/v1/responses", handleResponses)
+	mux.HandleFunc("/responses", handleResponses)
+
+	// Additional nested /v1 aliases for flexible client base URLs
+	mux.HandleFunc("/v1/v1/models", handleModels)
+	mux.HandleFunc("/v1/v1/chat/completions", handleChat)
+	mux.HandleFunc("/v1/v1/messages", handleAnthropicMessages)
+	mux.HandleFunc("/v1/v1/responses", handleResponses)
 
 	// Static assets handler (natively sanitized against traversal)
 	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir(assetsDir))))
