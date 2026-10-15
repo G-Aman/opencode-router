@@ -171,7 +171,6 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := genSessionID()
-	requestID := genRequestID()
 
 	cfgMu.RLock()
 	ua := cfg.UA
@@ -189,7 +188,7 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 		"x-opencode-client":  []string{"cli"},
 		"x-opencode-project": []string{"global"},
 		"x-opencode-session": []string{sessionID},
-		"x-opencode-request": []string{requestID},
+		"x-opencode-session-id": []string{sessionID},
 		"Accept":            []string{"*/*"},
 	}
 
