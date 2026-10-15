@@ -370,7 +370,6 @@ func probeModelUpstream(id string, auth string, session string) (*http.Response,
 	cfgMu.RUnlock()
 	timeout = 8000 // Fast probe timeout like Node
 
-	requestID := genRequestID()
 	headers := http.Header{
 		"Authorization":     []string{auth},
 		"Content-Type":      []string{"application/json"},
@@ -378,7 +377,7 @@ func probeModelUpstream(id string, auth string, session string) (*http.Response,
 		"x-opencode-client":  []string{"cli"},
 		"x-opencode-project": []string{"global"},
 		"x-opencode-session": []string{session},
-		"x-opencode-request": []string{requestID},
+		"x-opencode-session-id": []string{session},
 		"Accept":            []string{"*/*"},
 	}
 
@@ -387,12 +386,7 @@ func probeModelUpstream(id string, auth string, session string) (*http.Response,
 	format := "chat"
 	var payload map[string]interface{}
 
-	if strings.Contains(id, "space-bunny") {
-		payload = map[string]interface{}{
-			"model":    id,
-			"messages": []map[string]string{{"role": "user", "content": "ping"}},
-		}
-	} else if isMuse {
+	if isMuse {
 		targetURL = fmt.Sprintf("%s/responses", strings.TrimRight(upstream, "/"))
 		format = "responses"
 		payload = map[string]interface{}{

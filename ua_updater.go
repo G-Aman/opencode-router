@@ -48,7 +48,7 @@ func refreshUA(force bool) string {
 
 	uaAutoState.at = now
 
-	req, err := http.NewRequest("GET", "https://registry.npmjs.org/opencode-ai/latest", nil)
+	req, err := http.NewRequest("GET", "https://registry.npmjs.org/@opencode%2fcli/latest", nil)
 	if err != nil {
 		return uaAutoState.version
 	}
@@ -78,13 +78,11 @@ func refreshUA(force bool) string {
 	}
 
 	uaAutoState.version = v
-	// Replace only the opencode/<version> prefix, preserving the full SDK / runtime suffix
-	prefixRe := regexp.MustCompile(`^opencode/\d+\.\d+\.\d+`)
-	var nextUA string
-	if prefixRe.MatchString(currentUA) {
-		nextUA = prefixRe.ReplaceAllString(currentUA, fmt.Sprintf("opencode/%s", v))
-	} else {
-		nextUA = fmt.Sprintf("opencode/%s", v)
+	// Emit the CLI 2.x identity required by upstream: opencode/latest/<ver>/cli
+	nextUA := fmt.Sprintf("opencode/latest/%s/cli", v)
+	newPrefixRe := regexp.MustCompile(`^opencode/latest/\d+\.\d+\.\d+/cli$`)
+	if newPrefixRe.MatchString(currentUA) && currentUA == nextUA {
+		return v
 	}
 
 	if nextUA != currentUA {

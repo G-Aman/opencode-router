@@ -213,8 +213,8 @@ func defaultConfig() Config {
 	return Config{
 		Host:              "0.0.0.0",
 		Port:              8787,
-		Upstream:          "https://opencode.ai/zen/v1",
-		UA:                "opencode/1.18.34 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14",
+		Upstream:          "https://opencode.ai/inference/v1",
+		UA:                "opencode/latest/2.0.29/cli",
 		AutoUA:            true,
 		InjectSession:     true,
 		TimeoutMs:         120000,
@@ -251,7 +251,7 @@ func loadResources(dir string) error {
 		}
 	}
 	if cfg.Upstream == "" {
-		cfg.Upstream = "https://opencode.ai/zen/v1"
+		cfg.Upstream = "https://opencode.ai/inference/v1"
 	}
 
 	if b, err := os.ReadFile(filepath.Join(dir, "base_tools.json")); err == nil {
@@ -683,7 +683,7 @@ func handleApiConfig(w http.ResponseWriter, r *http.Request) {
 			newCfg.ProxyKey = cfg.ProxyKey
 		}
 		if newCfg.Upstream == "" {
-			newCfg.Upstream = "https://opencode.ai/zen/v1"
+			newCfg.Upstream = "https://opencode.ai/inference/v1"
 		}
 
 		cfg = newCfg
@@ -766,7 +766,6 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 
 	// Perform actual test probe
 	sessionID := genSessionID()
-	requestID := genRequestID()
 	cfgMu.RLock()
 	testAuth := "Bearer public"
 	if upstreamKey, ok := reqBody["upstreamKey"].(string); ok && strings.TrimSpace(upstreamKey) != "" {
@@ -785,7 +784,7 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 		"x-opencode-client":  []string{"cli"},
 		"x-opencode-project": []string{"global"},
 		"x-opencode-session": []string{sessionID},
-		"x-opencode-request": []string{requestID},
+		"x-opencode-session-id": []string{sessionID},
 		"Accept":            []string{"*/*"},
 	}
 
@@ -794,12 +793,7 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 	format := "chat"
 	var payload map[string]interface{}
 
-	if strings.Contains(model, "space-bunny") {
-		payload = map[string]interface{}{
-			"model":    model,
-			"messages": []map[string]string{{"role": "user", "content": "ping"}},
-		}
-	} else if isResponses {
+	if isResponses {
 		targetURL = strings.TrimRight(upstreamBase, "/") + "/responses"
 		format = "responses"
 		payload = map[string]interface{}{
@@ -977,7 +971,6 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := genSessionID()
-	requestID := genRequestID()
 
 	cfgMu.RLock()
 	ua := cfg.UA
@@ -995,7 +988,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		"x-opencode-client":  []string{"cli"},
 		"x-opencode-project": []string{"global"},
 		"x-opencode-session": []string{sessionID},
-		"x-opencode-request": []string{requestID},
+		"x-opencode-session-id": []string{sessionID},
 		"Accept":            []string{"*/*"},
 	}
 
@@ -1007,11 +1000,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 
 	var upstreamPayload map[string]interface{}
 
-	if strings.Contains(model, "space-bunny") {
-		upstreamPayload = reqBody
-		upstreamPayload["model"] = model
-		upstreamPayload["stream"] = true
-	} else if isResponses {
+	if isResponses {
 		messages, _ := reqBody["messages"].([]interface{})
 		var userSys []string
 		var inputItems []map[string]interface{}
