@@ -220,7 +220,13 @@ The router auto-generates `opencode-router.json` on first run if not present. Al
 
 ## 📝 Changelog
 
-### [v1.2.0] - Latest
+### [v2.0.29] - Latest
+- **Fixed free-tier `FreeTierError` (403) on all models:**
+  - Upstream moved to `/inference/v1` — router default updated.
+  - Now matches the official CLI 2.x request contract (identity + session headers).
+  - `space-bunny-free` fixed (was always 403).
+
+### [v1.2.0]
 - **Native OpenAI Responses API (`/v1/responses` & `/responses`):**
   - Full drop-in support for OpenAI Responses API payloads (string or typed `input` items, `instructions`, tools, streaming SSE, and non-streaming).
   - Strict compliance with OpenAI Responses SSE streaming specification (includes monotonic `sequence_number`, `item_id`, and `annotations` for seamless n8n AI Agent nodes and Vercel AI SDK compatibility).
