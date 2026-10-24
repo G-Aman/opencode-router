@@ -544,9 +544,6 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	totErr := totalErrors
 	statsMu.Unlock()
 
-	cfgMu.RLock()
-	defer cfgMu.RUnlock()
-
 	liveModels, modelsOk := fetchModels()
 	servedModels := make([]string, len(liveModels))
 	for i, m := range liveModels {
@@ -571,15 +568,21 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	syncStateMu.Unlock()
 
+	cfgMu.RLock()
+	cfgUpstream := cfg.Upstream
+	cfgUA := cfg.UA
+	hasProxyKey := cfg.ProxyKey != ""
+	cfgMu.RUnlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"uptime":        int(time.Since(startTime).Seconds()),
 		"upstreamOk":    modelsOk,
-		"upstream":      cfg.Upstream,
-		"ua":            cfg.UA,
+		"upstream":      cfgUpstream,
+		"ua":            cfgUA,
 		"uaAutoVersion": uaAutoState.version,
-		"auth":          map[string]interface{}{"mode": "proxy", "proxyKey": cfg.ProxyKey != ""},
+		"auth":          map[string]interface{}{"mode": "proxy", "proxyKey": hasProxyKey},
 		"requests": map[string]interface{}{
 			"total":      totReq,
 			"errors":     totErr,

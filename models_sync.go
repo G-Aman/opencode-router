@@ -239,6 +239,16 @@ func fetchModels() ([]map[string]interface{}, bool) {
 	}
 	cfgMu.RUnlock()
 
+	// If all models were marked dead or filtered out, NEVER return an empty list!
+	// Fall back to configured fallbackModels so the service never goes silent.
+	if len(free) == 0 {
+		free = buildFallbackModelList()
+		modelsCache.at = now
+		modelsCache.data = free
+		modelsCache.ok = false
+		return free, false
+	}
+
 	modelsCache.at = now
 	modelsCache.data = free
 	modelsCache.ok = true
