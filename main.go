@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,7 +21,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"net/url"
 )
 
 func modelFormat(id string) string {
@@ -62,30 +62,27 @@ func resolveModelName(rawModel string) string {
 	return model
 }
 
-
-
-
 type Config struct {
-	Host              string            `json:"host"`
-	Port              int               `json:"port"`
-	Upstream          string            `json:"upstream"`
-	UA                string            `json:"ua"`
-	AutoUA            bool              `json:"autoUA"`
-	InjectSession     bool              `json:"injectSession"`
-	DefaultModel      string            `json:"defaultModel"`
-	FallbackModels    []string          `json:"fallbackModels"`
-	DisabledModels    []string          `json:"disabledModels"`
-	ModelAliases      map[string]string `json:"modelAliases"`
-	ResponsesModels   []string          `json:"responsesModels"`
-	RateLimitMax      int               `json:"rateLimitMax"`
-	RateLimitWindowMs int               `json:"rateLimitWindowMs"`
-	ProxyKey          string            `json:"proxyKey"`
+	Host               string            `json:"host"`
+	Port               int               `json:"port"`
+	Upstream           string            `json:"upstream"`
+	UA                 string            `json:"ua"`
+	AutoUA             bool              `json:"autoUA"`
+	InjectSession      bool              `json:"injectSession"`
+	DefaultModel       string            `json:"defaultModel"`
+	FallbackModels     []string          `json:"fallbackModels"`
+	DisabledModels     []string          `json:"disabledModels"`
+	ModelAliases       map[string]string `json:"modelAliases"`
+	ResponsesModels    []string          `json:"responsesModels"`
+	RateLimitMax       int               `json:"rateLimitMax"`
+	RateLimitWindowMs  int               `json:"rateLimitWindowMs"`
+	ProxyKey           string            `json:"proxyKey"`
 	DefaultUpstreamKey string            `json:"defaultUpstreamKey"`
-	OutboundProxy     string            `json:"outboundProxy"`
-	TrustForwarded    bool              `json:"trustForwarded"`
-	TimeoutMs         int               `json:"timeoutMs"`
-	CacheMs           int               `json:"cacheMs"`
-	AutoSync          bool              `json:"autoSync"`
+	OutboundProxy      string            `json:"outboundProxy"`
+	TrustForwarded     bool              `json:"trustForwarded"`
+	TimeoutMs          int               `json:"timeoutMs"`
+	CacheMs            int               `json:"cacheMs"`
+	AutoSync           bool              `json:"autoSync"`
 	AutoSyncIntervalMs int               `json:"autoSyncIntervalMs"`
 	UaRefreshDays      float64           `json:"uaRefreshDays"`
 	UaRefreshMs        int               `json:"uaRefreshMs"`
@@ -119,23 +116,22 @@ var (
 	logLines []map[string]string
 )
 
-// getUpstreamClient returns an http.Client configured with timeouts and optional outbound proxy
+// getUpstreamClient uses the OpenCode-compatible TLS transport for upstream calls.
 func getUpstreamClient(timeout time.Duration) *http.Client {
 	cfgMu.RLock()
 	proxyStr := strings.TrimSpace(cfg.OutboundProxy)
 	cfgMu.RUnlock()
 
-	client := &http.Client{Timeout: timeout}
+	var proxyURL *url.URL
 	if proxyStr != "" {
-		if proxyURL, err := url.Parse(proxyStr); err == nil {
-			client.Transport = &http.Transport{
-				Proxy: http.ProxyURL(proxyURL),
-			}
-		} else {
+		parsed, err := url.Parse(proxyStr)
+		if err != nil {
 			log.Printf("proxy: invalid outbound proxy URL %q: %v", proxyStr, err)
+		} else {
+			proxyURL = parsed
 		}
 	}
-	return client
+	return &http.Client{Timeout: timeout, Transport: upstreamTransport(proxyURL)}
 }
 
 func addLog(msg string) {
@@ -578,12 +574,12 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"uptime":     int(time.Since(startTime).Seconds()),
-		"upstreamOk": modelsOk,
+		"uptime":        int(time.Since(startTime).Seconds()),
+		"upstreamOk":    modelsOk,
 		"upstream":      cfg.Upstream,
 		"ua":            cfg.UA,
 		"uaAutoVersion": uaAutoState.version,
-		"auth":       map[string]interface{}{"mode": "proxy", "proxyKey": cfg.ProxyKey != ""},
+		"auth":          map[string]interface{}{"mode": "proxy", "proxyKey": cfg.ProxyKey != ""},
 		"requests": map[string]interface{}{
 			"total":      totReq,
 			"errors":     totErr,
@@ -778,14 +774,14 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 	cfgMu.RUnlock()
 
 	headers := http.Header{
-		"Authorization":     []string{testAuth},
-		"Content-Type":      []string{"application/json"},
-		"User-Agent":        []string{testUA},
-		"x-opencode-client":  []string{"cli"},
-		"x-opencode-project": []string{"global"},
-		"x-opencode-session": []string{sessionID},
+		"Authorization":         []string{testAuth},
+		"Content-Type":          []string{"application/json"},
+		"User-Agent":            []string{testUA},
+		"x-opencode-client":     []string{"cli"},
+		"x-opencode-project":    []string{"global"},
+		"x-opencode-session":    []string{sessionID},
 		"x-opencode-session-id": []string{sessionID},
-		"Accept":            []string{"*/*"},
+		"Accept":                []string{"*/*"},
 	}
 
 	isResponses := modelFormat(model) == "responses"
@@ -797,11 +793,11 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 		targetURL = strings.TrimRight(upstreamBase, "/") + "/responses"
 		format = "responses"
 		payload = map[string]interface{}{
-			"model":              model,
-			"input":              []map[string]interface{}{{"role": "developer", "content": sysPromptMuse}, {"role": "user", "content": "ping"}},
-			"tools":              baseToolsMuse,
-			"tool_choice":        "auto",
-			"stream":             true,
+			"model":             model,
+			"input":             []map[string]interface{}{{"role": "developer", "content": sysPromptMuse}, {"role": "user", "content": "ping"}},
+			"tools":             baseToolsMuse,
+			"tool_choice":       "auto",
+			"stream":            true,
 			"max_output_tokens": 32,
 		}
 	} else {
@@ -982,14 +978,14 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	cfgMu.RUnlock()
 
 	headers := http.Header{
-		"Authorization":     []string{auth},
-		"Content-Type":      []string{"application/json"},
-		"User-Agent":        []string{ua},
-		"x-opencode-client":  []string{"cli"},
-		"x-opencode-project": []string{"global"},
-		"x-opencode-session": []string{sessionID},
+		"Authorization":         []string{auth},
+		"Content-Type":          []string{"application/json"},
+		"User-Agent":            []string{ua},
+		"x-opencode-client":     []string{"cli"},
+		"x-opencode-project":    []string{"global"},
+		"x-opencode-session":    []string{sessionID},
 		"x-opencode-session-id": []string{sessionID},
-		"Accept":            []string{"*/*"},
+		"Accept":                []string{"*/*"},
 	}
 
 	isResponses := modelFormat(model) == "responses"
@@ -1084,7 +1080,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 								"name":        fnName,
 								"description": fn["description"],
 								"parameters":  fn["parameters"],
-								"strict":       false,
+								"strict":      false,
 							})
 							existingNames[fnName] = true
 						}
@@ -1094,15 +1090,15 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		upstreamPayload = map[string]interface{}{
-			"model":              model,
-			"input":              inputItems,
-			"tools":              mergedTools,
-			"tool_choice":        "auto",
-			"stream":             true,
+			"model":             model,
+			"input":             inputItems,
+			"tools":             mergedTools,
+			"tool_choice":       "auto",
+			"stream":            true,
 			"max_output_tokens": 32000,
-			"store":              false,
-			"include":            []string{"reasoning.encrypted_content"},
-			"prompt_cache_key":   sessionID,
+			"store":             false,
+			"include":           []string{"reasoning.encrypted_content"},
+			"prompt_cache_key":  sessionID,
 		}
 	} else {
 		messages, _ := reqBody["messages"].([]interface{})
@@ -1548,7 +1544,6 @@ func main() {
 		log.Fatalf("Server failed: %v", err)
 	}
 }
-
 
 var (
 	rateBucketsMu sync.Mutex
