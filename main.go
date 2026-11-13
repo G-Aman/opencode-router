@@ -306,19 +306,29 @@ func loadResources(dir string) error {
 
 	if b, err := os.ReadFile(filepath.Join(dir, "base_tools.json")); err == nil {
 		json.Unmarshal(b, &baseToolsChat)
+	} else if b, err := assetFS.ReadFile("base_tools.json"); err == nil {
+		json.Unmarshal(b, &baseToolsChat)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "base_tools_muse.json")); err == nil {
+		json.Unmarshal(b, &baseToolsMuse)
+	} else if b, err := assetFS.ReadFile("base_tools_muse.json"); err == nil {
 		json.Unmarshal(b, &baseToolsMuse)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "system_prompt_chat.txt")); err == nil {
 		sysPromptChat = string(b)
+	} else if b, err := assetFS.ReadFile("system_prompt_chat.txt"); err == nil {
+		sysPromptChat = string(b)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "system_prompt_muse.txt")); err == nil {
+		sysPromptMuse = string(b)
+	} else if b, err := assetFS.ReadFile("system_prompt_muse.txt"); err == nil {
 		sysPromptMuse = string(b)
 	}
 
 	htmlPath := filepath.Join(dir, "public", "index.html")
 	if b, err := os.ReadFile(htmlPath); err == nil {
+		htmlIndex = b
+	} else if b, err := indexFS.ReadFile("public/index.html"); err == nil {
 		htmlIndex = b
 	}
 

@@ -99,7 +99,7 @@ jobs:
           cp -r public/* dist/"$pkg_name"/public/
           cp -r assets/* dist/"$pkg_name"/assets/
           rm -rf dist/"$pkg_name"/assets/screenshots
-          cp base_tools.json base_tools_muse.json README.md dist/"$pkg_name"/
+          cp base_tools.json base_tools_muse.json system_prompt_chat.txt system_prompt_muse.txt README.md dist/"$pkg_name"/
 
           cd dist
           zip -r "${pkg_name}.zip" "$pkg_name"
