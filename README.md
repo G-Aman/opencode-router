@@ -220,7 +220,7 @@ The router auto-generates `opencode-router.json` on first run if not present. Al
 
 ## 📝 Changelog
 
-### [v2.0.30] - Latest
+### [v2.3.0] - Latest
 - **Fixed misleading `429 FreeUsageLimitError` on all free models (verified end-to-end):**
   - opencode.ai's free-tier gate fingerprints the official CLI on three layers; the router now matches all of them:
     1. **TLS ClientHello fingerprint** — replays the official client's exact hello via uTLS (`fingerprint.go`), with a fresh spec per dial and one pooled connection per host.
