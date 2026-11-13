@@ -365,27 +365,28 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 
 	// Build upstream OpenAI payload
 	upstreamPayload := map[string]interface{}{
-		"model":      model,
-		"messages":   upMsgs,
-		"stream":     true,
-		"tools":      mergedTools,
-		"max_tokens": 32000,
+		"model":                 model,
+		"messages":              upMsgs,
+		"stream":                true,
+		"tools":                 mergedTools,
+		"max_completion_tokens": 32000,
+		"stream_options":        map[string]interface{}{"include_usage": true},
 	}
 
-	sessionID := genSessionID()
+	sessionID := pickSessionID(r, conversationKeyFromAnthropic(req))
 	randBytes := make([]byte, 16)
 	rand.Read(randBytes)
 	requestID := hex.EncodeToString(randBytes)
 
 	headers := http.Header{
-		"Authorization":     []string{upstreamAuth},
-		"Content-Type":      []string{"application/json"},
-		"User-Agent":        []string{ua},
+		"Authorization":      []string{upstreamAuth},
+		"Content-Type":       []string{"application/json"},
+		"User-Agent":         []string{ua},
 		"x-opencode-client":  []string{"cli"},
-		"x-opencode-project": []string{"global"},
+		"x-opencode-project": []string{"7560b3d9f780bdeb8dc65b8472a9a960de47a869"},
 		"x-opencode-session": []string{sessionID},
-		"x-opencode-session-id": []string{sessionID},
-		"Accept":            []string{"*/*"},
+		"x-opencode-request": []string{requestID},
+		"Accept":             []string{"*/*"},
 	}
 
 	isResponses := modelFormat(model) == "responses"

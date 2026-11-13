@@ -69,6 +69,9 @@ type Config struct {
 	UA                 string            `json:"ua"`
 	AutoUA             bool              `json:"autoUA"`
 	InjectSession      bool              `json:"injectSession"`
+	SessionStrategy    string            `json:"sessionStrategy"` // per-request | sticky | conversation
+	SessionWindowMin   int               `json:"sessionWindowMin"`
+	TlsSpoof           bool              `json:"tlsSpoof"`
 	DefaultModel       string            `json:"defaultModel"`
 	FallbackModels     []string          `json:"fallbackModels"`
 	DisabledModels     []string          `json:"disabledModels"`
@@ -116,22 +119,79 @@ var (
 	logLines []map[string]string
 )
 
-// getUpstreamClient uses the OpenCode-compatible TLS transport for upstream calls.
+// Shared upstream transport: one pooled connection per host (serialized, like
+// the real client) — pooling avoids repeated TLS handshakes, MaxConnsPerHost=1
+// enforces the free lane's one-request-at-a-time behaviour.
+var (
+	upTrMu      sync.Mutex
+	upTrKey     string
+	upTransport http.RoundTripper
+)
+
+func buildUpstreamTransport(proxyStr string, spoof bool) http.RoundTripper {
+	var base http.RoundTripper
+	if spoof && spoofSpec != nil {
+		tr := &http.Transport{
+			DialTLSContext:    spoofDialTLS,
+			ForceAttemptHTTP2: false, // captured hello offers http/1.1 only
+			MaxConnsPerHost:   1,
+			IdleConnTimeout:   15 * time.Minute,
+		}
+		if proxyStr != "" && !strings.HasPrefix(proxyStr, "socks5") && !strings.HasPrefix(proxyStr, "socks5h") {
+			// handled inside spoofDialTLS (CONNECT tunneling)
+		} else if proxyStr != "" {
+			if proxyURL, err := url.Parse(proxyStr); err == nil {
+				tr = &http.Transport{Proxy: http.ProxyURL(proxyURL), MaxConnsPerHost: 1, IdleConnTimeout: 15 * time.Minute}
+				log.Printf("tls-spoof: socks5 outbound proxy set — spoofing disabled for proxied requests")
+			}
+		}
+		base = tr
+	} else {
+		tr := &http.Transport{MaxConnsPerHost: 1, IdleConnTimeout: 15 * time.Minute}
+		if proxyStr != "" {
+			if proxyURL, err := url.Parse(proxyStr); err == nil {
+				tr.Proxy = http.ProxyURL(proxyURL)
+			} else {
+				log.Printf("proxy: invalid outbound proxy URL %q: %v", proxyStr, err)
+			}
+		}
+		base = tr
+	}
+	return &retryTransport{base: base}
+}
+
+// getUpstreamClient returns an http.Client configured with timeouts, optional
+// outbound proxy, TLS fingerprint spoofing (free-tier gate), and 429 backoff.
 func getUpstreamClient(timeout time.Duration) *http.Client {
 	cfgMu.RLock()
 	proxyStr := strings.TrimSpace(cfg.OutboundProxy)
+	spoof := cfg.TlsSpoof && spoofSpec != nil
+	if proxyStr != "" && strings.HasPrefix(proxyStr, "socks5") {
+		spoof = false
+	}
 	cfgMu.RUnlock()
 
-	var proxyURL *url.URL
-	if proxyStr != "" {
-		parsed, err := url.Parse(proxyStr)
-		if err != nil {
-			log.Printf("proxy: invalid outbound proxy URL %q: %v", proxyStr, err)
-		} else {
-			proxyURL = parsed
-		}
+	key := fmt.Sprintf("spoof=%v|proxy=%s", spoof, proxyStr)
+	upTrMu.Lock()
+	if upTransport == nil || upTrKey != key {
+		upTransport = buildUpstreamTransport(proxyStr, spoof)
+		upTrKey = key
 	}
-	return &http.Client{Timeout: timeout, Transport: upstreamTransport(proxyURL)}
+	rt := upTransport
+	upTrMu.Unlock()
+
+	return &http.Client{Timeout: timeout, Transport: rt}
+}
+
+// currentOutboundProxy returns the configured outbound proxy host:port (empty if none).
+func currentOutboundProxy() string {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
+	proxyStr := strings.TrimSpace(cfg.OutboundProxy)
+	if proxyStr == "" || strings.HasPrefix(proxyStr, "socks5") {
+		return ""
+	}
+	return stripScheme(proxyStr)
 }
 
 func addLog(msg string) {
@@ -178,17 +238,8 @@ func recordReq(status int, model string, ms int64) {
 	}
 }
 
-func genSessionID() string {
-	nowMs := time.Now().UnixNano() / 1e6
-	invPart := uint32(0xFFFFFFFF - (nowMs & 0xFFFFFFFF))
-	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	randPart := make([]byte, 14)
-	for i := range randPart {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
-		randPart[i] = chars[n.Int64()]
-	}
-	return fmt.Sprintf("ses_f%08xffe%s", invPart, string(randPart))
-}
+// genSessionID moved to session.go — replicates opencode's native format
+// ("ses_" + 12 hex chars of the inverted 48-bit timestamp + 14 random chars).
 
 func genRequestID() string {
 	nowMs := time.Now().UnixNano() / 1e6
@@ -213,6 +264,9 @@ func defaultConfig() Config {
 		UA:                "opencode/latest/2.0.29/cli",
 		AutoUA:            true,
 		InjectSession:     true,
+		SessionStrategy:   "per-request",
+		SessionWindowMin:  10,
+		TlsSpoof:          true,
 		TimeoutMs:         120000,
 		RateLimitWindowMs: 60000,
 		ProxyKey:          "",
@@ -765,6 +819,7 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 
 	// Perform actual test probe
 	sessionID := genSessionID()
+	requestID := genRequestID()
 	cfgMu.RLock()
 	testAuth := "Bearer public"
 	if upstreamKey, ok := reqBody["upstreamKey"].(string); ok && strings.TrimSpace(upstreamKey) != "" {
@@ -777,14 +832,14 @@ func handleApiTest(w http.ResponseWriter, r *http.Request) {
 	cfgMu.RUnlock()
 
 	headers := http.Header{
-		"Authorization":         []string{testAuth},
-		"Content-Type":          []string{"application/json"},
-		"User-Agent":            []string{testUA},
-		"x-opencode-client":     []string{"cli"},
-		"x-opencode-project":    []string{"global"},
-		"x-opencode-session":    []string{sessionID},
-		"x-opencode-session-id": []string{sessionID},
-		"Accept":                []string{"*/*"},
+		"Authorization":      []string{testAuth},
+		"Content-Type":       []string{"application/json"},
+		"User-Agent":         []string{testUA},
+		"x-opencode-client":  []string{"cli"},
+		"x-opencode-project": []string{"7560b3d9f780bdeb8dc65b8472a9a960de47a869"},
+		"x-opencode-session": []string{sessionID},
+		"x-opencode-request": []string{requestID},
+		"Accept":             []string{"*/*"},
 	}
 
 	isResponses := modelFormat(model) == "responses"
@@ -969,7 +1024,8 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := genSessionID()
+	sessionID := pickSessionID(r, reqBody)
+	requestID := genRequestID()
 
 	cfgMu.RLock()
 	ua := cfg.UA
@@ -981,14 +1037,14 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	cfgMu.RUnlock()
 
 	headers := http.Header{
-		"Authorization":         []string{auth},
-		"Content-Type":          []string{"application/json"},
-		"User-Agent":            []string{ua},
-		"x-opencode-client":     []string{"cli"},
-		"x-opencode-project":    []string{"global"},
-		"x-opencode-session":    []string{sessionID},
-		"x-opencode-session-id": []string{sessionID},
-		"Accept":                []string{"*/*"},
+		"Authorization":      []string{auth},
+		"Content-Type":       []string{"application/json"},
+		"User-Agent":         []string{ua},
+		"x-opencode-client":  []string{"cli"},
+		"x-opencode-project": []string{"7560b3d9f780bdeb8dc65b8472a9a960de47a869"},
+		"x-opencode-session": []string{sessionID},
+		"x-opencode-request": []string{requestID},
+		"Accept":             []string{"*/*"},
 	}
 
 	isResponses := modelFormat(model) == "responses"
@@ -1155,11 +1211,12 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		upstreamPayload = map[string]interface{}{
-			"model":      model,
-			"messages":   upMsgs,
-			"tools":      mergedTools,
-			"stream":     true,
-			"max_tokens": 32000,
+			"model":                 model,
+			"messages":              upMsgs,
+			"tools":                 mergedTools,
+			"stream":                true,
+			"max_completion_tokens": 32000,
+			"stream_options":        map[string]interface{}{"include_usage": true},
 		}
 	}
 

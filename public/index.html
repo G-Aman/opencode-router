@@ -502,6 +502,15 @@ textarea { resize:vertical; min-height:96px; font-family:var(--mono); font-size:
           <div>
             <label>Proxy key (empty = open)</label><input id="cfgProxyKey" type="password" autocomplete="new-password">
             <div class="checkbox"><input type="checkbox" id="cfgInject"><span>Inject <code>x-opencode-session</code> header per client (free tier needs it)</span></div>
+            <div class="checkbox"><input type="checkbox" id="cfgTlsSpoof"><span>TLS fingerprint spoofing <span class="hint">(uTLS replay of opencode's ClientHello — required by the free-tier gate)</span></span></div>
+            <label>Session ID strategy</label>
+            <select id="cfgSessionStrategy">
+              <option value="per-request">Per request — fresh ID each call (previous default)</option>
+              <option value="sticky">Sticky window — one shared ID, rotated periodically</option>
+              <option value="conversation">Per conversation — reuse ID per chat (header or fingerprint)</option>
+            </select>
+            <label>Sticky window (minutes) <span class="hint">(rotation period for sticky strategy; also applies to aged-out fallback)</span></label>
+            <input id="cfgSessionWindow" type="number" min="1" max="240">
           </div>
           <div>
             <label>Upstream Key (BYOK, optional)</label><input id="cfgUpstreamKey" type="password" autocomplete="new-password">
@@ -1040,6 +1049,9 @@ async function populateConfigForm() {
   $("cfgAutoUA").checked = config.autoUA !== false
   $("cfgUaDays").value = config.uaRefreshDays != null ? config.uaRefreshDays : (config.uaRefreshMs ? +(config.uaRefreshMs / 86400000).toFixed(2) : 1)
   $("cfgInject").checked = config.injectSession !== false
+  $("cfgTlsSpoof").checked = config.tlsSpoof !== false
+  $("cfgSessionStrategy").value = ["per-request", "sticky", "conversation"].includes(config.sessionStrategy) ? config.sessionStrategy : "per-request"
+  $("cfgSessionWindow").value = config.sessionWindowMin ?? 10
   $("cfgRateLimit").checked = Number(config.rateLimitMax) > 0
   $("cfgRateMax").value = config.rateLimitMax ?? 0
   $("cfgRateWindow").value = config.rateLimitWindowMs ?? 60000
@@ -1081,6 +1093,9 @@ async function saveConfig() {
     uaRefreshDays: Number($("cfgUaDays").value || 1),
     uaRefreshMs: Math.round(Number($("cfgUaDays").value || 1) * 86400000),
     injectSession: $("cfgInject").checked,
+    tlsSpoof: $("cfgTlsSpoof").checked,
+    sessionStrategy: $("cfgSessionStrategy").value,
+    sessionWindowMin: Number($("cfgSessionWindow").value || 10),
     rateLimitMax: $("cfgRateLimit").checked ? Number($("cfgRateMax").value || 0) : 0,
     rateLimitWindowMs: Number($("cfgRateWindow").value || 60000),
   }

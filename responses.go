@@ -170,7 +170,8 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := genSessionID()
+	sessionID := pickSessionID(r, reqBody)
+	requestID := genRequestID()
 
 	cfgMu.RLock()
 	ua := cfg.UA
@@ -182,14 +183,14 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	cfgMu.RUnlock()
 
 	headers := http.Header{
-		"Authorization":     []string{auth},
-		"Content-Type":      []string{"application/json"},
-		"User-Agent":        []string{ua},
+		"Authorization":      []string{auth},
+		"Content-Type":       []string{"application/json"},
+		"User-Agent":         []string{ua},
 		"x-opencode-client":  []string{"cli"},
-		"x-opencode-project": []string{"global"},
+		"x-opencode-project": []string{"7560b3d9f780bdeb8dc65b8472a9a960de47a869"},
 		"x-opencode-session": []string{sessionID},
-		"x-opencode-session-id": []string{sessionID},
-		"Accept":            []string{"*/*"},
+		"x-opencode-request": []string{requestID},
+		"Accept":             []string{"*/*"},
 	}
 
 	// Extract top-level instructions if present
@@ -491,11 +492,12 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 		}
 
 		upstreamPayload = map[string]interface{}{
-			"model":      model,
-			"messages":   upMsgs,
-			"tools":      mergedTools,
-			"stream":     true,
-			"max_tokens": maxTokens,
+			"model":                 model,
+			"messages":              upMsgs,
+			"tools":                 mergedTools,
+			"stream":                true,
+			"max_completion_tokens": maxTokens,
+			"stream_options":        map[string]interface{}{"include_usage": true},
 		}
 	}
 
