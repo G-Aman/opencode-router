@@ -220,7 +220,17 @@ The router auto-generates `opencode-router.json` on first run if not present. Al
 
 ## 📝 Changelog
 
-### [v2.0.29] - Latest
+### [v2.0.30] - Latest
+- **Fixed misleading `429 FreeUsageLimitError` on all free models (verified end-to-end):**
+  - opencode.ai's free-tier gate fingerprints the official CLI on three layers; the router now matches all of them:
+    1. **TLS ClientHello fingerprint** — replays the official client's exact hello via uTLS (`fingerprint.go`), with a fresh spec per dial and one pooled connection per host.
+    2. **Self-authenticating session IDs** — `x-opencode-session` now embeds a recent timestamp in the native format (`session.go`); strategies: per-request, sticky, per-conversation (configurable in settings).
+    3. **Native body shape** — native system prompt + 12-tool set + `max_completion_tokens` / `stream_options` fields; caller tools still merge.
+  - 429 backoff-retry, stale-connection retry, aged-session regeneration.
+  - Upstream default corrected to `/inference/openai/v1`; UA pinned to `opencode/latest/2.2.7/cli`; `autoUA` off by default (stale metadata source clobbered the required UA).
+  - Supersedes the hand-built `transport.go` hello spec with a byte-perfect captured replay.
+
+### [v2.0.29]
 - **Fixed free-tier `FreeTierError` (403) on all models:**
   - Upstream moved to `/inference/v1` — router default updated.
   - Now matches the official CLI 2.x request contract (identity + session headers).

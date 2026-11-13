@@ -260,9 +260,9 @@ func defaultConfig() Config {
 	return Config{
 		Host:              "0.0.0.0",
 		Port:              8787,
-		Upstream:          "https://opencode.ai/inference/v1",
-		UA:                "opencode/latest/2.0.29/cli",
-		AutoUA:            true,
+		Upstream:          "https://opencode.ai/inference/openai/v1",
+		UA:                "opencode/latest/2.2.7/cli",
+		AutoUA:            false,
 		InjectSession:     true,
 		SessionStrategy:   "per-request",
 		SessionWindowMin:  10,
@@ -301,7 +301,7 @@ func loadResources(dir string) error {
 		}
 	}
 	if cfg.Upstream == "" {
-		cfg.Upstream = "https://opencode.ai/inference/v1"
+		cfg.Upstream = "https://opencode.ai/inference/openai/v1"
 	}
 
 	if b, err := os.ReadFile(filepath.Join(dir, "base_tools.json")); err == nil {
@@ -736,7 +736,7 @@ func handleApiConfig(w http.ResponseWriter, r *http.Request) {
 			newCfg.ProxyKey = cfg.ProxyKey
 		}
 		if newCfg.Upstream == "" {
-			newCfg.Upstream = "https://opencode.ai/inference/v1"
+			newCfg.Upstream = "https://opencode.ai/inference/openai/v1"
 		}
 
 		cfg = newCfg
