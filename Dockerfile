@@ -5,7 +5,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
-COPY system_prompt_chat.txt system_prompt_muse.txt ./
+COPY system_prompt_chat.txt system_prompt_muse.txt base_tools.json base_tools_muse.json ./
+COPY public/ ./public/
 
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o opencode-router .
 
